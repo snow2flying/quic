@@ -2010,8 +2010,10 @@ static int quic_sock_set_crypto_secret(struct sock *sk, struct quic_crypto_secre
 			/* If 0-RTT send key is ready, set data_level to EARLY.  This allows
 			 * quic_outq_transmit_stream() to emit stream frames in 0-RTT packets.
 			 */
-			if (secret->level == QUIC_CRYPTO_EARLY)
+			if (secret->level == QUIC_CRYPTO_EARLY) {
 				outq->data_level = QUIC_CRYPTO_EARLY;
+				quic_outq_transmit(sk);
+			}
 			return 0;
 		}
 		/* 0-RTT or Handshake receive key is ready; decrypt and process all buffered
