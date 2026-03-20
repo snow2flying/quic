@@ -618,6 +618,7 @@ int quic_crypto_decrypt(struct quic_crypto *crypto, struct sk_buff *skb)
 		if (crypto->key_pending && cb->key_phase != crypto->key_phase) {
 			crypto->key_pending = 0;
 			crypto->key_update_time = 0;
+			crypto->key_update_send_time = 0;
 		}
 		return err;
 	}
@@ -634,6 +635,7 @@ out:
 		if (time && quic_ktime_get_us() - time >= crypto->key_update_time) {
 			crypto->key_pending = 0;
 			crypto->key_update_time = 0;
+			crypto->key_update_send_time = 0;
 		}
 	}
 	return err;
