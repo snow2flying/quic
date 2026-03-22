@@ -382,6 +382,7 @@ u32 quic_path_pl_send(struct quic_path_group *paths, s64 number)
 			paths->pl.state = QUIC_PL_BASE;  /* Search Complete -> Base */
 			paths->pl.probe_size = QUIC_BASE_PLPMTU;
 
+			/* probe_high already reset when entering COMPLETE. */
 			paths->pl.pmtu = QUIC_BASE_PLPMTU;
 			pathmtu = QUIC_BASE_PLPMTU;
 		}
