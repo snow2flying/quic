@@ -253,8 +253,9 @@ static int quic_packet_rcv_err(struct sock *sk, struct sk_buff *skb)
 	bh_lock_sock(sk);
 	quic_paths(sk)->mtu_info = info;
 	if (sock_owned_by_user(sk)) {
-		/* Socket is in use by userspace context.  Defer MTU processing to later via
-		 * tasklet.  Ensure the socket is not dropped before deferral.
+		/* Socket locked by userspace. Defer MTU processing via
+		 * release_cb. Hold socket reference to prevent it being
+		 * freed before deferral.
 		 */
 		if (!test_and_set_bit(QUIC_MTU_REDUCED_DEFERRED, &sk->sk_tsq_flags))
 			sock_hold(sk);
