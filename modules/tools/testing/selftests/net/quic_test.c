@@ -1479,6 +1479,7 @@ static int test_connection(int connectfd, int acceptfd)
 	flags = MSG_QUIC_STREAM_NEW | MSG_QUIC_STREAM_FIN;
 	if (echo(acceptfd, connectfd, sid, flags))
 		return -1;
+	sleep(1);
 	printf("[] Peer key update completed\n");
 
 	/* Token */

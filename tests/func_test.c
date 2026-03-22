@@ -493,6 +493,7 @@ static int do_client_notification_test(int sockfd)
 	}
 	printf("test21: PASS (QUIC_EVENT_KEY_UPDATE event for local key_update)\n");
 
+	sleep(1);
 	flags = MSG_QUIC_STREAM_NEW | MSG_QUIC_STREAM_FIN;
 	sid  = 116;
 	strcpy(msg, "client key_update");
