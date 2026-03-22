@@ -948,6 +948,9 @@ int quic_crypto_get_retry_tag(struct quic_crypto *crypto, struct sk_buff *skb,
 	u32 plen;
 	int err;
 
+	if (skb->len < QUIC_TAG_LEN)
+		return -EINVAL;
+
 	/* rfc9001#section-5.8:
 	 *
 	 * The Retry Integrity Tag is a 128-bit field that is computed as the output of

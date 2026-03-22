@@ -32,7 +32,9 @@ struct quic_conn_id {
 
 static inline void quic_conn_id_update(struct quic_conn_id *conn_id, u8 *data, u32 len)
 {
-	/* Caller must ensure len does not exceed QUIC_CONN_ID_MAX_LEN. */
+	/* The caller must ensure len does not exceed QUIC_CONN_ID_MAX_LEN. */
+	if (WARN_ON_ONCE(len > QUIC_CONN_ID_MAX_LEN))
+		return;
 	memcpy(conn_id->data, data, len);
 	conn_id->len = (u8)len;
 }

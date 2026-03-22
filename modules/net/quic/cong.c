@@ -661,6 +661,8 @@ EXPORT_SYMBOL_GPL(quic_cong_rtt_update);
 void quic_cong_set_algo(struct quic_cong *cong, u8 algo)
 {
 	/* The caller must ensure algo < QUIC_CONG_ALG_MAX. */
+	if (WARN_ON_ONCE(algo >= QUIC_CONG_ALG_MAX))
+		return;
 	cong->algo = algo;
 	cong->state = QUIC_CONG_SLOW_START;
 	cong->ssthresh = U32_MAX;
