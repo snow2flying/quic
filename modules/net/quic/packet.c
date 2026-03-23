@@ -608,7 +608,6 @@ int quic_packet_rcv(struct sock *sk, struct sk_buff *skb, bool icmp)
 	bh_lock_sock(sk);
 	if (sock_owned_by_user(sk)) {
 		/* Socket is busy (owned by user context): queue to backlog. */
-		QUIC_SKB_CB(skb)->backlog = 1;
 		err = sk_add_backlog(sk, skb, READ_ONCE(sk->sk_rcvbuf));
 		if (err) {
 			bh_unlock_sock(sk);
