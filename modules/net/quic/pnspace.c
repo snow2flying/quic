@@ -37,6 +37,7 @@ void quic_pnspace_free(struct quic_pnspace *space)
 {
 	space->pn_map_len = 0;
 	kfree(space->pn_map);
+	space->pn_map = NULL;
 }
 EXPORT_SYMBOL_GPL(quic_pnspace_free);
 
