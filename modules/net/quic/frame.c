@@ -375,6 +375,9 @@ static struct quic_frame *quic_frame_crypto_create(struct sock *sk, void *data, 
 	u8 *p;
 
 	max_frame_len = quic_packet_max_payload(quic_packet(sk)); /* MSS. */
+	/* Reserve space for a possible retry token in Client Initial. */
+	if (info->level == QUIC_CRYPTO_INITIAL && !quic_is_serv(sk))
+		max_frame_len -= (U8_MAX + 1);
 	crypto = quic_crypto(sk, info->level);
 	msg_len = iov_iter_count(info->msg);
 	wspace = sk_stream_wspace(sk);
