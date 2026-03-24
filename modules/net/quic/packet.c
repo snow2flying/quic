@@ -79,11 +79,28 @@ static u8 quic_packet_version_put_type(u32 version, u8 type)
 	}
 }
 
+/* Extracts a QUIC Connection ID from a buffer in the long header packet. */
+static int quic_packet_get_connid(struct quic_conn_id *connid, u8 **pp,
+				  u32 *plen)
+{
+	u64 len;
+
+	if (!quic_get_int(pp, plen, &len, 1) ||
+	    len > *plen || len > QUIC_CONN_ID_MAX_LEN)
+		return -EINVAL;
+
+	quic_conn_id_update(connid, *pp, len);
+	*plen -= len;
+	*pp += len;
+	return 0;
+}
+
 /* Parse QUIC version and connection IDs (DCID and SCID) from a Long header packet buffer. */
 static int quic_packet_get_long_header(struct quic_conn_id *dcid, struct quic_conn_id *scid,
 				       u32 *version, u8 **pp, u32 *plen)
 {
-	u64 len, v;
+	int err;
+	u64 v;
 
 	*pp += QUIC_HLEN;
 	*plen -= QUIC_HLEN;
@@ -93,22 +110,12 @@ static int quic_packet_get_long_header(struct quic_conn_id *dcid, struct quic_co
 	if (version)
 		*version = v;
 
-	if (!quic_get_int(pp, plen, &len, 1) ||
-	    len > *plen || len > QUIC_CONN_ID_MAX_LEN)
-		return -EINVAL;
-	quic_conn_id_update(dcid, *pp, len);
-	*plen -= len;
-	*pp += len;
-
+	err = quic_packet_get_connid(dcid, pp, plen);
+	if (err)
+		return err;
 	if (!scid)
 		return 0;
-	if (!quic_get_int(pp, plen, &len, 1) ||
-	    len > *plen || len > QUIC_CONN_ID_MAX_LEN)
-		return -EINVAL;
-	quic_conn_id_update(scid, *pp, len);
-	*plen -= len;
-	*pp += len;
-	return 0;
+	return quic_packet_get_connid(scid, pp, plen);
 }
 
 /* Change the QUIC version for the connection.
