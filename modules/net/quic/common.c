@@ -154,7 +154,7 @@ int quic_hash_tables_init(void)
 	else
 		limit = nr_pages >> (24 - PAGE_SHIFT);
 
-	limit = roundup_pow_of_two(limit);
+	limit = roundup_pow_of_two(limit ?: 1);
 
 	/* Source connection ID table (fast lookup, larger size) */
 	size = min(limit, 64 * 1024U);
