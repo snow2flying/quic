@@ -27,13 +27,13 @@ enum {
 };
 
 enum {
-	QUIC_ECN_LOCAL,		/* ECN bits from incoming IP headers */
-	QUIC_ECN_PEER,		/* ECN bits reported by peer in ACK frames */
+	QUIC_ECN_LOCAL, /* ECN bits from incoming IP headers */
+	QUIC_ECN_PEER,  /* ECN bits reported by peer in ACK frames */
 	QUIC_ECN_DIR_MAX
 };
 
-/* Represents a gap (range of missing packets) in the ACK map.  The values are offsets from
- * base_pn, with both 'start' and 'end' being +1.
+/* Represents a gap (range of missing packets) in the ACK map.  The values are
+ * offsets from base_pn, with both 'start' and 'end' being +1.
  */
 struct quic_gap_ack_block {
 	u16 start;
@@ -59,33 +59,34 @@ struct quic_gap_ack_block {
  *   - From (base_pn - 1) to max_pn_seen
  */
 struct quic_pnspace {
-	/* ECN counters indexed by direction (TX/RX) and ECN codepoint (ECT1, ECT0, CE) */
+	/* ECN counters indexed by dir and ECN codepoint (ECT1, ECT0, CE) */
 	u64 ecn_count[QUIC_ECN_DIR_MAX][QUIC_ECN_MAX];
-	unsigned long *pn_map;	/* Bit map tracking received packet numbers for ACK generation */
-	u16 pn_map_len;		/* Length of the packet number bit map (in bits) */
-	u8  need_sack;		/* Flag indicating a SACK frame should be sent for this space */
-	u8  sack_path;		/* Path used for sending the SACK frame */
+	unsigned long *pn_map; /* Received PN bitmap for ACK generation */
+	u16 pn_map_len;        /* Length of the PN bit map (in bits) */
+	u8  need_sack;         /* Flag indicating a SACK frame should be sent */
+	u8  sack_path;         /* Path used for sending the SACK frame */
 
-	s64 last_max_pn_seen;	/* Highest packet number seen before pn_map advanced */
-	u64 last_max_pn_time;	/* Timestamp when last_max_pn_seen was received */
-	s64 min_pn_seen;	/* Smallest packet number received in this space */
-	s64 max_pn_seen;	/* Largest packet number received in this space */
-	u64 max_pn_time;	/* Timestamp when max_pn_seen was received */
-	s64 base_pn;		/* Packet number corresponding to the start of the pn_map */
-	u64 time;		/* Cached current timestamp, or latest socket accept timestamp */
+	s64 last_max_pn_seen; /* Largest PN seen before pn_map advance */
+	u64 last_max_pn_time; /* Timestamp last_max_pn_seen was received */
+	s64 min_pn_seen;      /* Smallest PN received */
+	s64 max_pn_seen;      /* Largest PN received */
+	u64 max_pn_time;      /* Timestamp max_pn_seen was received */
+	s64 base_pn; /* PN corresponding to the start of the pn_map */
+	u64 time;    /* Cached now, or latest socket accept timestamp */
 
-	s64 max_pn_acked_seen;	/* Largest packet number acknowledged by the peer */
-	u64 max_pn_acked_time;	/* Timestamp when max_pn_acked_seen was acknowledged */
-	u64 last_sent_time;	/* Timestamp when the last ack-eliciting packet was sent */
-	u64 loss_time;		/* Timestamp after which the next packet can be declared lost */
-	s64 next_pn;		/* Next packet number to send in this space */
+	s64 max_pn_acked_seen; /* Largest PN ACKed by peer */
+	u64 max_pn_acked_time; /* Timestamp max_pn_acked_seen was ACKed */
+	u64 last_sent_time;    /* Timestamp last ack-eliciting packet sent */
+	u64 loss_time;         /* Timestamp the packet can be declared lost */
+	s64 next_pn;           /* Next PN to send */
 
-	u32 max_time_limit;	/* Time threshold to trigger pn_map advancement on packet receipt */
-	u32 inflight;		/* Bytes of all ack-eliciting frames in flight in this space */
+	u32 max_time_limit; /* Time threshold to trigger pn_map advance */
+	u32 inflight;       /* Ack-eliciting bytes in flight */
 };
 
-static inline void quic_pnspace_set_max_pn_acked_seen(struct quic_pnspace *space,
-						      s64 max_pn_acked_seen)
+static inline void
+quic_pnspace_set_max_pn_acked_seen(struct quic_pnspace *space,
+				   s64 max_pn_acked_seen)
 {
 	if (space->max_pn_acked_seen >= max_pn_acked_seen)
 		return;
@@ -109,7 +110,8 @@ static inline bool quic_pnspace_has_gap(const struct quic_pnspace *space)
 	return space->base_pn != space->max_pn_seen + 1;
 }
 
-static inline void quic_pnspace_inc_ecn_count(struct quic_pnspace *space, u8 ecn)
+static inline void quic_pnspace_inc_ecn_count(struct quic_pnspace *space,
+					      u8 ecn)
 {
 	if (!ecn)
 		return;
@@ -127,22 +129,27 @@ static inline bool quic_pnspace_has_ecn_count(struct quic_pnspace *space)
 /* Updates the stored ECN counters based on values received in the peer's ACK
  * frame. Each counter is updated only if the new value is higher.
  *
- * Returns: true if CE count was increased (congestion indicated), false otherwise.
+ * Returns: true if CE count was increased (congestion indicated), false
+ * otherwise.
  */
-static inline bool quic_pnspace_set_ecn_count(struct quic_pnspace *space, u64 *ecn_count)
+static inline bool quic_pnspace_set_ecn_count(struct quic_pnspace *space,
+					      u64 *ecn_count)
 {
-	if (space->ecn_count[QUIC_ECN_PEER][QUIC_ECN_ECT0] < ecn_count[QUIC_ECN_ECT0])
-		space->ecn_count[QUIC_ECN_PEER][QUIC_ECN_ECT0] = ecn_count[QUIC_ECN_ECT0];
-	if (space->ecn_count[QUIC_ECN_PEER][QUIC_ECN_ECT1] < ecn_count[QUIC_ECN_ECT1])
-		space->ecn_count[QUIC_ECN_PEER][QUIC_ECN_ECT1] = ecn_count[QUIC_ECN_ECT1];
-	if (space->ecn_count[QUIC_ECN_PEER][QUIC_ECN_CE] < ecn_count[QUIC_ECN_CE]) {
-		space->ecn_count[QUIC_ECN_PEER][QUIC_ECN_CE] = ecn_count[QUIC_ECN_CE];
+	u64 *count = space->ecn_count[QUIC_ECN_PEER];
+
+	if (count[QUIC_ECN_ECT0] < ecn_count[QUIC_ECN_ECT0])
+		count[QUIC_ECN_ECT0] = ecn_count[QUIC_ECN_ECT0];
+	if (count[QUIC_ECN_ECT1] < ecn_count[QUIC_ECN_ECT1])
+		count[QUIC_ECN_ECT1] = ecn_count[QUIC_ECN_ECT1];
+	if (count[QUIC_ECN_CE] < ecn_count[QUIC_ECN_CE]) {
+		count[QUIC_ECN_CE] = ecn_count[QUIC_ECN_CE];
 		return true;
 	}
 	return false;
 }
 
-u16 quic_pnspace_num_gabs(struct quic_pnspace *space, struct quic_gap_ack_block *gabs);
+u16 quic_pnspace_num_gabs(struct quic_pnspace *space,
+			  struct quic_gap_ack_block *gabs);
 int quic_pnspace_check(struct quic_pnspace *space, s64 pn);
 int quic_pnspace_mark(struct quic_pnspace *space, s64 pn);
 
