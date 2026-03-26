@@ -12,7 +12,9 @@
 
 #include "socket.h"
 
-/* Return true a frame can not be transmitted based on congestion control and Anti-Amplification. */
+/* Return true a frame can not be transmitted based on congestion control and
+ * Anti-Amplification.
+ */
 static bool quic_outq_limit_check(struct sock *sk, struct quic_frame *frame)
 {
 	struct quic_path_group *paths = quic_paths(sk);
@@ -25,13 +27,16 @@ static bool quic_outq_limit_check(struct sock *sk, struct quic_frame *frame)
 		return true;
 
 	/* Enforce congestion control for ack-eliciting frames except PING. */
-	if (!outq->single && frame->ack_eliciting && !quic_frame_ping(frame->type)) {
+	if (!outq->single && frame->ack_eliciting &&
+	    !quic_frame_ping(frame->type)) {
 		len = packet->frame_len + frame->len;
 		if (outq->inflight + len > outq->window)
 			return true;
 	}
 
-	/* rfc9000#section-21.1.1.1: Anti-amplification limit for server before path validation. */
+	/* rfc9000#section-21.1.1.1: Anti-amplification limit for server before
+	 * path validation.
+	 */
 	if (quic_is_serv(sk) && !paths->validated) {
 		len = packet->len + frame->len + quic_packet_taglen(packet);
 		if (paths->ampl_sndlen + len > paths->ampl_rcvlen * 3) {
@@ -58,7 +63,9 @@ static int quic_outq_transmit_flush(struct sock *sk)
 	return count;
 }
 
-/* Transmits control frames at a given encryption level (Initial, Handshake, 1-RTT)). */
+/* Transmits control frames at a given encryption level (Initial, Handshake,
+ * 1-RTT)).
+ */
 static void quic_outq_transmit_ctrl(struct sock *sk, u8 level)
 {
 	struct quic_pnspace *space = quic_pnspace(sk, level);
@@ -69,7 +76,8 @@ static void quic_outq_transmit_ctrl(struct sock *sk, u8 level)
 	if (!quic_crypto(sk, level)->send_ready)
 		return;
 
-	if (space->need_sack) { /* Transmit SACK (ACK for crypto space) first if needed. */
+	if (space->need_sack) {
+		/* Transmit SACK (ACK for crypto space) first if needed. */
 		if (!quic_outq_transmit_frame(sk, QUIC_FRAME_ACK, &level,
 					      space->sack_path, true))
 			space->need_sack = 0;
@@ -77,7 +85,7 @@ static void quic_outq_transmit_ctrl(struct sock *sk, u8 level)
 
 	head = &outq->control_list;
 	list_for_each_entry_safe(frame, next, head, list) {
-		if (!frame->level && level) /* Initial, Handshake levels precede 1-RTT (0). */
+		if (!frame->level && level) /* Initial/Handshake before 1-RTT */
 			break;
 		if (frame->level != level)
 			continue;
@@ -116,23 +124,28 @@ static void quic_outq_transmit_dgram(struct sock *sk)
 	}
 }
 
-/* Applies stream and connection-level flow control. Returns 1 if blocked, 0 otherwise.
- * Send a STREAM_DATA_BLOCKED or DATA_BLOCKED frame if blocked and sndblock is true.
+/* Applies stream and connection-level flow control. Returns 1 if blocked, 0
+ * otherwise.  Send a STREAM_DATA_BLOCKED or DATA_BLOCKED frame if blocked and
+ * sndblock is true.
  */
-int quic_outq_flow_control(struct sock *sk, struct quic_stream *stream, u16 bytes, bool sndblock)
+int quic_outq_flow_control(struct sock *sk, struct quic_stream *stream,
+			   u16 bytes, bool sndblock)
 {
 	struct quic_outqueue *outq = quic_outq(sk);
 	u8 frame, blocked = 0, transmit = 0;
 
 	/* Check stream-level flow control. */
 	if (stream->send.bytes + bytes > stream->send.max_bytes) {
-		/* Send a STREAM_DATA_BLOCKED frame only after the previous one is acknowledged,
-		 * and stream->send.max_bytes has been updated via a received MAX_STREAM_DATA frame.
+		/* Send a STREAM_DATA_BLOCKED frame only after the previous one
+		 * is acknowledged, and stream->send.max_bytes has been updated
+		 * via a received MAX_STREAM_DATA frame.
 		 */
 		if (!stream->send.data_blocked &&
 		    stream->send.last_max_bytes < stream->send.max_bytes) {
 			frame = QUIC_FRAME_STREAM_DATA_BLOCKED;
-			if (sndblock && !quic_outq_transmit_frame(sk, frame, stream, 0, true))
+			if (sndblock &&
+			    !quic_outq_transmit_frame(sk, frame, stream, 0,
+						      true))
 				transmit = 1;
 			stream->send.last_max_bytes = stream->send.max_bytes;
 			stream->send.data_blocked = 1;
@@ -141,12 +154,15 @@ int quic_outq_flow_control(struct sock *sk, struct quic_stream *stream, u16 byte
 	}
 	/* Check connection-level flow control. */
 	if (outq->bytes + bytes > outq->max_bytes) {
-		/* Send a DATA_BLOCKED frame only after the previous one is acknowledged,
-		 * and max_bytes has been updated via a received MAX_DATA frame.
+		/* Send a DATA_BLOCKED frame only after the previous one is
+		 * acknowledged, and max_bytes has been updated via a received
+		 * MAX_DATA frame.
 		 */
-		if (!outq->data_blocked && outq->last_max_bytes < outq->max_bytes) {
+		if (!outq->data_blocked &&
+		    outq->last_max_bytes < outq->max_bytes) {
 			frame = QUIC_FRAME_DATA_BLOCKED;
-			if (sndblock && !quic_outq_transmit_frame(sk, frame, outq, 0, true))
+			if (sndblock &&
+			    !quic_outq_transmit_frame(sk, frame, outq, 0, true))
 				transmit = 1;
 			outq->last_max_bytes = outq->max_bytes;
 			outq->data_blocked = 1;
@@ -170,14 +186,15 @@ u64 quic_outq_wspace(struct sock *sk, struct quic_stream *stream)
 
 	if (stream) {
 		len = min_t(u64, len, sk_stream_wspace(sk));
-		len = min_t(u64, len, stream->send.max_bytes - stream->send.bytes);
+		len = min_t(u64, len,
+			    stream->send.max_bytes - stream->send.bytes);
 	}
 
 	return len;
 }
 
-/* Applies pacing and Nagle’s algorithm. Returns true if sending should be delayed, false if
- * immediate send.
+/* Applies pacing and Nagle’s algorithm. Returns true if sending should be
+ * delayed, false if immediate send.
  */
 static bool quic_outq_delay_check(struct sock *sk, u8 level, bool nodelay)
 {
@@ -185,11 +202,11 @@ static bool quic_outq_delay_check(struct sock *sk, u8 level, bool nodelay)
 	struct quic_outqueue *outq = quic_outq(sk);
 	u64 pacing_time;
 
-	if (level || outq->close_frame) /* No delay for early data or if connection is closing. */
-		return false;
+	if (level || outq->close_frame)
+		return false; /* No delay for early data/closing conn */
 
 	pacing_time = quic_cong(sk)->pacing_time;
-	if (pacing_time > ktime_get_ns()) { /* Delay data transmission in PACE timer. */
+	if (pacing_time > ktime_get_ns()) { /* Delay data TX in PACE timer. */
 		quic_timer_start(sk, QUIC_TIMER_PACE, pacing_time);
 		return true;
 	}
@@ -199,12 +216,15 @@ static bool quic_outq_delay_check(struct sock *sk, u8 level, bool nodelay)
 	/* If there’s already data queued in the packet, send immediately. */
 	if (!quic_packet_empty(packet))
 		return false;
-	/* If Nagle is disabled via config or no data is in flight, and MSG_MORE isn't set,
-	 * allow immediate send.
+	/* If Nagle is disabled via config or no data is in flight, and
+	 * MSG_MORE isn't set, allow immediate send.
 	 */
-	if ((outq->stream_data_nodelay || !outq->inflight) && !outq->force_delay)
+	if ((outq->stream_data_nodelay || !outq->inflight) &&
+	    !outq->force_delay)
 		return false;
-	/* If enough stream data is available to build a full-sized packet, send immediately. */
+	/* If enough stream data is available to build a full-sized packet,
+	 * send immediately.
+	 */
 	if (outq->stream_list_len > quic_packet_mss(packet))
 		return false;
 	return true; /* Otherwise, delay sending to coalesce more data. */
@@ -217,8 +237,9 @@ static void quic_outq_transmit_stream(struct sock *sk)
 	struct quic_frame *frame, *next;
 	struct list_head *head;
 
-	/* Although frame->level is always App, stream data may need to be sent at App or Early
-	 * level depending on key availability. Use outq->data_level to select the level.
+	/* Although frame->level is always App, stream data may need to be sent
+	 * at App or Early level depending on key availability. Use
+	 * outq->data_level to select the level.
 	 */
 	if (!quic_crypto(sk, outq->data_level)->send_ready)
 		return;
@@ -240,7 +261,7 @@ static void quic_outq_transmit_stream(struct sock *sk)
 	}
 }
 
-/* Transmits pending frames at a specific encryption level from transmitted_list. */
+/* Sends pending frames at a specific encryption level from transmitted_list. */
 static void quic_outq_transmit_old(struct sock *sk, u8 level)
 {
 	struct quic_outqueue *outq = quic_outq(sk);
@@ -254,7 +275,8 @@ static void quic_outq_transmit_old(struct sock *sk, u8 level)
 		if (frame->level != level)
 			continue;
 		/* Do not transmit old Datagram and PING frames. */
-		if (quic_frame_dgram(frame->type) || quic_frame_ping(frame->type))
+		if (quic_frame_dgram(frame->type) ||
+		    quic_frame_ping(frame->type))
 			continue;
 		if (!quic_crypto(sk, frame->level)->send_ready)
 			break;
@@ -269,7 +291,7 @@ static void quic_outq_transmit_old(struct sock *sk, u8 level)
 	}
 }
 
-/* Sends all pending frames from the outqueue. Returns number of packets sent. */
+/* Sends all pending frames from outqueue. Returns number of packets sent. */
 int quic_outq_transmit(struct sock *sk)
 {
 	quic_outq_transmit_ctrl(sk, QUIC_CRYPTO_INITIAL);
@@ -287,11 +309,11 @@ static int quic_outq_transmit_single(struct sock *sk, u8 level)
 {
 	struct quic_outqueue *outq = quic_outq(sk);
 
-	outq->single = 1; /* Mark that we are doing a single-packet transmission. */
+	outq->single = 1; /* Mark single-packet transmission. */
 	quic_outq_transmit_ctrl(sk, level);
 
 	if (level == QUIC_CRYPTO_APP) {
-		/* Only need to transmit DATAGRAM and STREAM frames at application level. */
+		/* Transmit DATAGRAM and STREAM frames at app level. */
 		quic_outq_transmit_dgram(sk);
 		quic_outq_transmit_stream(sk);
 	}
@@ -328,8 +350,11 @@ static void quic_outq_set_owner_w(int len, struct sock *sk)
 	sk_mem_charge(sk, len);
 }
 
-/* Appends data to an existing stream frame at the tail of the stream_list if possible. */
-int quic_outq_stream_append(struct sock *sk, struct quic_msginfo *info, bool pack)
+/* Appends data to an existing stream frame at the tail of the stream_list if
+ * possible.
+ */
+int quic_outq_stream_append(struct sock *sk, struct quic_msginfo *info,
+			    bool pack)
 {
 	struct quic_stream_table *streams = quic_streams(sk);
 	struct quic_outqueue *outq = quic_outq(sk);
@@ -341,8 +366,8 @@ int quic_outq_stream_append(struct sock *sk, struct quic_msginfo *info, bool pac
 	head = &outq->stream_list;
 	if (list_empty(head))
 		return -ENOENT;
-	/* Append only if it's the same stream, the frame is the last of a sendmsg (i.e.,
-	 * !nodelay) and it hasn't been transmitted yet (number < 0).
+	/* Append only if it's the same stream, the frame is last of a sendmsg
+	 * (i.e., !nodelay) and it hasn't been transmitted yet (number < 0).
 	 */
 	frame = list_last_entry(head, struct quic_frame, list);
 	if (frame->stream != stream || frame->nodelay || frame->number >= 0)
@@ -350,12 +375,12 @@ int quic_outq_stream_append(struct sock *sk, struct quic_msginfo *info, bool pac
 
 	len = frame->len;
 	bytes = quic_frame_stream_append(sk, frame, info, pack);
-	/* If append failed or this was just a size probe, return immediately. */
+	/* If append failed or this was a size probe, return immediately. */
 	if (bytes < 0 || !pack)
 		return bytes;
 
-	/* If FIN bit is now set and the stream was in SEND state, mark it SENT and clear
-	 * active_stream_id if it matches.
+	/* If FIN bit is now set and the stream was in SEND state, mark it SENT
+	 * and clear active_stream_id if it matches.
 	 */
 	if (frame->type & QUIC_STREAM_BIT_FIN &&
 	    stream->send.state == QUIC_STREAM_SEND_STATE_SEND) {
@@ -375,7 +400,9 @@ int quic_outq_stream_append(struct sock *sk, struct quic_msginfo *info, bool pac
 	return bytes;
 }
 
-/* Queues a stream frame at the tail of the stream list and optionally triggers transmission. */
+/* Queues a stream frame at the tail of the stream list and optionally triggers
+ * transmission.
+ */
 void quic_outq_stream_tail(struct sock *sk, struct quic_frame *frame, bool cork)
 {
 	struct quic_stream_table *streams = quic_streams(sk);
@@ -384,12 +411,12 @@ void quic_outq_stream_tail(struct sock *sk, struct quic_frame *frame, bool cork)
 
 	/* rfc9000#section-3.1:
 	 *
-	 * Sending the first STREAM or STREAM_DATA_BLOCKED frame causes a sending part of a
-	 * stream to enter the "Send" state.
+	 * Sending the first STREAM or STREAM_DATA_BLOCKED frame causes a
+	 * sending part of a stream to enter the "Send" state.
 	 *
-	 * After the application indicates that all stream data has been sent and a STREAM
-	 * frame containing the FIN bit is sent, the sending part of the stream enters the
-	 * "Data Sent" state.
+	 * After the application indicates that all stream data has been sent
+	 * and a STREAM frame containing the FIN bit is sent, the sending part
+	 * of the stream enters the "Data Sent" state.
 	 */
 	if (stream->send.state == QUIC_STREAM_SEND_STATE_READY)
 		stream->send.state = QUIC_STREAM_SEND_STATE_SEND;
@@ -416,7 +443,9 @@ void quic_outq_stream_tail(struct sock *sk, struct quic_frame *frame, bool cork)
 		quic_outq_transmit(sk);
 }
 
-/* Queues a datagram frame at the tail of the datagram list and optionally transmits. */
+/* Queues a datagram frame at the tail of the datagram list and optionally
+ * transmits.
+ */
 void quic_outq_dgram_tail(struct sock *sk, struct quic_frame *frame, bool cork)
 {
 	struct quic_outqueue *outq = quic_outq(sk);
@@ -428,7 +457,9 @@ void quic_outq_dgram_tail(struct sock *sk, struct quic_frame *frame, bool cork)
 		quic_outq_transmit(sk);
 }
 
-/* Queues a control frame in control_list in correct order and optionally transmits. */
+/* Queues a control frame in control_list in correct order and optionally
+ * transmits.
+ */
 void quic_outq_ctrl_tail(struct sock *sk, struct quic_frame *frame, bool cork)
 {
 	struct quic_outqueue *outq = quic_outq(sk);
@@ -468,7 +499,9 @@ void quic_outq_ctrl_tail(struct sock *sk, struct quic_frame *frame, bool cork)
 		quic_outq_transmit(sk);
 }
 
-/* Inserts a frame into transmitted_list in order by level and number (first packet number used). */
+/* Inserts a frame into transmitted_list in order by level and number (first
+ * packet number used).
+ */
 void quic_outq_transmitted_tail(struct sock *sk, struct quic_frame *frame)
 {
 	struct list_head *head = &quic_outq(sk)->transmitted_list;
@@ -476,8 +509,9 @@ void quic_outq_transmitted_tail(struct sock *sk, struct quic_frame *frame)
 
 	/* Insert frame in priority order:
 	 *
-	 *   Initial (level == 1) > Handshake (level == 2) > Application (level == 0);
-	 *   At same level: first packet number used less > first packet number used greater.
+	 *   Initial (level == 1) > Handshake (level == 2) > Application
+	 *   (level == 0); At same level: first packet number used less >
+	 *   first packet number used greater.
 	 */
 	list_for_each_entry(pos, head, list) {
 		if (!frame->level) {
@@ -501,7 +535,7 @@ number:
 			break;
 		}
 	}
-	frame->transmitted = 1;  /* Mark the frame as added to the transmitted_list. */
+	frame->transmitted = 1; /* Mark as in transmitted_list. */
 	list_add_tail(&frame->list, head);
 }
 
@@ -555,7 +589,7 @@ void quic_outq_transmit_probe(struct sock *sk)
 	number = space->next_pn;
 	if (!quic_outq_transmit_frame(sk, QUIC_FRAME_PING, &info, 0, false)) {
 		pathmtu = quic_path_pl_send(paths, number);
-		if (pathmtu) /* Pathmtu may drop if probe failure count exceeded the limit. */
+		if (pathmtu) /* Pathmtu may drop if probe failures exceeds. */
 			quic_packet_mss_update(sk, pathmtu + taglen);
 	}
 
@@ -574,16 +608,20 @@ void quic_outq_transmit_close(struct sock *sk, u8 type, u32 errcode, u8 level)
 
 	close.errcode = errcode;
 	close.frame = type;
-	quic_inq_event_recv(sk, QUIC_EVENT_CONNECTION_CLOSE, &close, sizeof(close));
+	quic_inq_event_recv(sk, QUIC_EVENT_CONNECTION_CLOSE, &close,
+			    sizeof(close));
 
 	outq->close_errcode = errcode;
 	outq->close_frame = type;
 
-	quic_outq_transmit_frame(sk, QUIC_FRAME_CONNECTION_CLOSE, &level, 0, false);
+	quic_outq_transmit_frame(sk, QUIC_FRAME_CONNECTION_CLOSE, &level, 0,
+				 false);
 	quic_set_state(sk, QUIC_SS_CLOSED);
 }
 
-/* Send an application-level CONNECTION_CLOSE frame, typically called by close() or shutdown(). */
+/* Send an application-level CONNECTION_CLOSE frame, typically called by
+ * close() or shutdown().
+ */
 void quic_outq_transmit_app_close(struct sock *sk)
 {
 	u32 errcode = QUIC_TRANSPORT_ERROR_APPLICATION;
@@ -591,13 +629,15 @@ void quic_outq_transmit_app_close(struct sock *sk)
 	struct quic_outqueue *outq = quic_outq(sk);
 
 	if (quic_is_established(sk)) {
-		/* Set close_frame so send is not delayed in quic_outq_delay_check(). */
+		/* Set close_frame so send is not delayed in
+		 * quic_outq_delay_check().
+		 */
 		level = QUIC_CRYPTO_APP;
 		type = QUIC_FRAME_CONNECTION_CLOSE_APP;
 		outq->close_frame = type;
-		quic_outq_transmit(sk); /* Flush data before sending close frame. */
+		quic_outq_transmit(sk); /* Flush before sending close frame. */
 	} else if (quic_is_establishing(sk)) {
-		/* Connection still in handshake: send close in INITIAL level packets. */
+		/* Handshake in progress: send close in INITIAL packets. */
 		level = QUIC_CRYPTO_INITIAL;
 		outq->close_errcode = errcode;
 	} else { /* Connection is already closed: no action needed. */
@@ -606,8 +646,9 @@ void quic_outq_transmit_app_close(struct sock *sk)
 	quic_outq_transmit_frame(sk, type, &level, 0, false);
 }
 
-/* Processes frames in a sent packet that have been acknowledged (ACKed). */
-static void quic_outq_psent_sack_frames(struct sock *sk, struct quic_packet_sent *sent)
+/* Processes frames in a sent packet that have been ACKed. */
+static void quic_outq_psent_sack_frames(struct sock *sk,
+					struct quic_packet_sent *sent)
 {
 	struct quic_frame *frame;
 	int acked = 0, i;
@@ -616,8 +657,8 @@ static void quic_outq_psent_sack_frames(struct sock *sk, struct quic_packet_sent
 	for (i = 0; i < sent->frames; i++) {
 		frame = sent->frame_array[i];
 		if (list_empty(&frame->list)) {
-			/* It is already ACKed by another packet: just drop reference held in
-			 * frame_array.
+			/* It is already ACKed by another packet: just drop
+			 * reference held in frame_array.
 			 */
 			quic_frame_put(frame);
 			continue;
@@ -625,7 +666,7 @@ static void quic_outq_psent_sack_frames(struct sock *sk, struct quic_packet_sent
 		quic_frame_put(frame); /* Drop reference held in frame_array. */
 
 		acked += frame->bytes;
-		/* Remove from send/transmitted list and drop reference held by it. */
+		/* Remove from send/transmitted list and release reference. */
 		quic_frame_ack(sk, frame);
 	}
 	quic_outq_wfree(acked, sk);
@@ -634,42 +675,48 @@ static void quic_outq_psent_sack_frames(struct sock *sk, struct quic_packet_sent
 #define QUIC_PMTUD_RAISE_TIMER_FACTOR	30
 
 /* Confirms the path probe and triggers PLPMTUD state machine. */
-static void quic_outq_path_confirm(struct sock *sk, u8 level, s64 largest, s64 smallest)
+static void quic_outq_path_confirm(struct sock *sk, u8 level, s64 largest,
+				   s64 smallest)
 {
 	struct quic_path_group *paths = quic_paths(sk);
 	struct quic_outqueue *outq = quic_outq(sk);
 	bool raise_timer, complete;
-	u32 pathmtu;
+	u32 pathmtu, intv;
 
-	/* Reset pto_count unless the client is unsure if the server has validated the client's
-	 * address.
+	/* Reset pto_count unless the client is unsure if the server has
+	 * validated the client's address.
 	 */
 	if (paths->validated)
 		outq->pto_count = 0;
 
-	/* Check if this packet number confirms PLPMTUD probe in APP level (0). */
-	if (level || !quic_path_pl_confirm(paths, largest, smallest))
+	/* Check if this packet number confirms PLPMTUD probe in APP level. */
+	if (level != QUIC_CRYPTO_APP ||
+	    !quic_path_pl_confirm(paths, largest, smallest))
 		return;
 
 	/* Get new path MTU and check if raise timer is needed. */
 	pathmtu = quic_path_pl_recv(paths, &raise_timer, &complete);
-	if (pathmtu)
-		quic_packet_mss_update(sk, pathmtu + quic_packet_taglen(quic_packet(sk)));
-	if (!complete) /* If PLPMTUD is not complete, continue sending a probe packet. */
+	if (pathmtu) {
+		pathmtu += quic_packet_taglen(quic_packet(sk));
+		quic_packet_mss_update(sk, pathmtu);
+	}
+	if (!complete) /* Continue sending probe if PLPMTUD incomplete. */
 		quic_outq_transmit_probe(sk);
-	if (raise_timer) /* Reset the probe timer as raise timer if needed. */
-		quic_timer_reset(sk, QUIC_TIMER_PMTU,
-				 (u64)paths->plpmtud_interval * QUIC_PMTUD_RAISE_TIMER_FACTOR);
+	if (raise_timer) { /* Reset the probe timer as raise timer if needed. */
+		intv = paths->plpmtud_interval * QUIC_PMTUD_RAISE_TIMER_FACTOR;
+		quic_timer_reset(sk, QUIC_TIMER_PMTU, intv);
+	}
 }
 
 /* rfc9002#section-a.7: OnAckReceived()
  *
- * Process ACK reception for transmitted packets: This function identifies newly acknowledged
- * packets in the specified packet number space, updates congestion control and RTT measurements,
- * removes acknowledged packets from tracking, and adjusts send window and pacing accordingly.
+ * Process ACK reception for transmitted packets: This function identifies
+ * newly acknowledged packets in the specified packet number space, updates
+ * congestion control and RTT measurements, removes acknowledged packets from
+ * tracking, and adjusts send window and pacing accordingly.
  */
-void quic_outq_transmitted_sack(struct sock *sk, u8 level, s64 largest, s64 smallest,
-				s64 ack_largest, u32 ack_delay)
+void quic_outq_transmitted_sack(struct sock *sk, u8 level, s64 largest,
+				s64 smallest, s64 ack_largest, u32 ack_delay)
 {
 	struct quic_pnspace *space = quic_pnspace(sk, level);
 	struct quic_crypto *crypto = quic_crypto(sk, level);
@@ -679,10 +726,14 @@ void quic_outq_transmitted_sack(struct sock *sk, u8 level, s64 largest, s64 smal
 	u32 acked = 0;
 
 	quic_outq_path_confirm(sk, level, largest, smallest);
-	pr_debug("%s: largest: %llu, smallest: %llu\n", __func__, largest, smallest);
+	pr_debug("%s: largest: %llu, smallest: %llu\n", __func__, largest,
+		 smallest);
 
-	/* Iterate backwards over sent packets to efficiently process newly ACKed packets. */
-	list_for_each_entry_safe_reverse(sent, next, &outq->packet_sent_list, list) {
+	/* Iterate backwards over sent packets to efficiently process newly
+	 * ACKed packets.
+	 */
+	list_for_each_entry_safe_reverse(sent, next, &outq->packet_sent_list,
+					 list) {
 		if (level != sent->level)
 			continue;
 		if (sent->number > largest)
@@ -694,8 +745,9 @@ void quic_outq_transmitted_sack(struct sock *sk, u8 level, s64 largest, s64 smal
 		 *
 		 * To perform ECN validation for a new path:
 		 *
-		 * The endpoint monitors whether all packets sent with an ECT codepoint are
-		 * eventually deemed lost, indicating that ECN validation has failed.
+		 * The endpoint monitors whether all packets sent with an ECT
+		 * codepoint are eventually deemed lost, indicating that ECN
+		 * validation has failed.
 		 */
 		if (sent->ecn)
 			quic_set_sk_ecn(sk, INET_ECN_ECT_0);
@@ -706,16 +758,17 @@ void quic_outq_transmitted_sack(struct sock *sk, u8 level, s64 largest, s64 smal
 		quic_outq_psent_sack_frames(sk, sent);
 
 		if (sent->number == ack_largest) {
-			/* Update the RTT if the largest acknowledged is newly acked. */
+			/* Update RTT if largest acknowledged is newly ACKed. */
 			quic_pnspace_set_max_pn_acked_seen(space, sent->number);
 			quic_cong_rtt_update(cong, sent->sent_time, ack_delay);
 
-			/* These two members are calculated based on cong.pto. */
+			/* These two values derived from cong.pto. */
 			space->max_time_limit = cong->pto * 2;
 			crypto->key_update_time = cong->pto * 2;
 		}
 		/* Call cong.on_packet_acked() and sync send window. */
-		quic_cong_on_packet_acked(cong, sent->sent_time, sent->frame_len, sent->number);
+		quic_cong_on_packet_acked(cong, sent->sent_time,
+					  sent->frame_len, sent->number);
 		quic_outq_sync_window(sk, cong->window);
 
 		acked += sent->frame_len;
@@ -729,9 +782,9 @@ void quic_outq_transmitted_sack(struct sock *sk, u8 level, s64 largest, s64 smal
 
 /* rfc9002#section-a.8: GetLossTimeAndSpace()
  *
- * Find the earliest loss detection timer among the three packet number spaces: Initial,
- * Handshake, and Application. Return the earliest loss time and update the level to indicate
- * which packet number space it belongs to.
+ * Find the earliest loss detection timer among the three packet number spaces:
+ * Initial, Handshake, and Application. Return the earliest loss time and
+ * update the level to indicate which packet number space it belongs to.
  */
 static u64 quic_outq_get_loss_time(struct sock *sk, u8 *level)
 {
@@ -752,7 +805,7 @@ static u64 quic_outq_get_loss_time(struct sock *sk, u8 *level)
 		*level = QUIC_CRYPTO_HANDSHAKE;
 	}
 
-	/* Check Application packet number space for an even earlier loss time. */
+	/* Check App packet number space for an even earlier loss time. */
 	s = quic_pnspace(sk, QUIC_CRYPTO_APP);
 	t = s->loss_time;
 	if (t && (!time || time > t)) {
@@ -765,9 +818,9 @@ static u64 quic_outq_get_loss_time(struct sock *sk, u8 *level)
 
 /* rfc9002#section-a.8: GetPtoTimeAndSpace()
  *
- * Calculate the earliest Probe Timeout (PTO) expiration time across packet number spaces.
- * Returns the time at which the PTO expires and updates the level indicating the packet number
- * space associated with the PTO timer.
+ * Calculate the earliest Probe Timeout (PTO) expiration time across packet
+ * number spaces.  Returns the time at which the PTO expires and updates the
+ * level indicating the packet number space associated with the PTO timer.
  */
 static u64 quic_outq_get_pto_time(struct sock *sk, u8 *level)
 {
@@ -779,8 +832,8 @@ static u64 quic_outq_get_pto_time(struct sock *sk, u8 *level)
 	duration = (u64)quic_cong(sk)->pto * BIT(outq->pto_count);
 
 	if (!outq->inflight) {
-		/* If nothing is inflight, PTO is scheduled for the next expected handshake or
-		 * initial packet.
+		/* If nothing is inflight, PTO is scheduled for the next
+		 * expected handshake or initial packet.
 		 */
 		*level = QUIC_CRYPTO_INITIAL;
 		if (quic_crypto(sk, QUIC_CRYPTO_HANDSHAKE)->send_ready)
@@ -796,7 +849,7 @@ static u64 quic_outq_get_pto_time(struct sock *sk, u8 *level)
 		*level = QUIC_CRYPTO_INITIAL;
 	}
 
-	/* Check Handshake packet space PTO expiration time and choose earliest. */
+	/* Check Handshake packet space PTO expiration and choose earliest. */
 	s = quic_pnspace(sk, QUIC_CRYPTO_HANDSHAKE);
 	if (s->inflight) {
 		t = s->last_sent_time + duration;
@@ -825,10 +878,10 @@ static u64 quic_outq_get_pto_time(struct sock *sk, u8 *level)
 
 /* rfc9002#section-a.8: SetLossDetectionTimer()
  *
- * Update the loss detection timer for the socket based on the earliest loss time or PTO.  If no
- * loss time is found, and no inflight packets exist but connection is established or path is
- * blocked due to anti-amplification limit, stop the loss timer. Otherwise, set it to the
- * earliest PTO time.
+ * Update the loss detection timer for the socket based on the earliest loss
+ * time or PTO.  If no loss time is found, and no inflight packets exist but
+ * connection is established or path is blocked due to anti-amplification
+ * limit, stop the loss timer. Otherwise, set it to the earliest PTO time.
  */
 void quic_outq_update_loss_timer(struct sock *sk)
 {
@@ -852,8 +905,8 @@ out:
 	quic_timer_reset(sk, QUIC_TIMER_LOSS, t);
 }
 
-/* Syncs the congestion window with the socket send buffer size.  Called after congestion
- * control updates the window.
+/* Syncs the congestion window with the socket send buffer size.  Called after
+ * congestion control updates the window.
  */
 void quic_outq_sync_window(struct sock *sk, u32 window)
 {
@@ -869,11 +922,12 @@ void quic_outq_sync_window(struct sock *sk, u32 window)
 	/* Dynamically adjust sk_sndbuf based on the congestion window. */
 	sk->sk_sndbuf = (int)window * 2;
 	if (sk_stream_wspace(sk) > 0)
-		sk->sk_write_space(sk); /* Wake up processes blocked on sending. */
+		sk->sk_write_space(sk); /* Wake blocked senders */
 }
 
 /* Put the timeout frame back to the corresponding outqueue for transmitting. */
-static void quic_outq_retransmit_frame(struct sock *sk, struct quic_frame *frame)
+static void quic_outq_retransmit_frame(struct sock *sk,
+				       struct quic_frame *frame)
 {
 	struct quic_outqueue *outq = quic_outq(sk);
 	struct quic_frame *pos;
@@ -888,9 +942,9 @@ static void quic_outq_retransmit_frame(struct sock *sk, struct quic_frame *frame
 
 	/* Insert frame in priority order:
 	 *
-	 *   Initial (level == 1) > Handshake (level == 2) > Application (level == 0);
-	 *   At same level: first packet number used less > first packet number used greater >
-	 *     first packet number used negative.
+	 *   Initial (level == 1) > Handshake (level == 2) > Application
+	 *   (level == 0); At same level: first packet number used less > first
+	 *   packet number used greater > first packet number used negative.
 	 */
 	list_for_each_entry(pos, head, list) {
 		if (!frame->level) {
@@ -918,31 +972,35 @@ number:
 	QUIC_INC_STATS(sock_net(sk), QUIC_MIB_FRM_RETRANS);
 }
 
-/* Retransmits retransmittable frames from a sent packet.  Called when a packet is declared lost. */
-static void quic_outq_psent_retransmit_frames(struct sock *sk, struct quic_packet_sent *sent)
+/* Retransmits retransmittable frames from a sent packet.  Called when a packet
+ * is declared lost.
+ */
+static void quic_outq_psent_retransmit_frames(struct sock *sk,
+					      struct quic_packet_sent *sent)
 {
 	struct quic_frame *frame;
 	int bytes = 0, i;
 
 	for (i = 0; i < sent->frames; i++) {
 		frame = sent->frame_array[i];
-		if (list_empty(&frame->list)) { /* It is already ACKed by another packet. */
+		if (list_empty(&frame->list)) { /* ACKed by another packet. */
 			quic_frame_put(frame);
 			continue;
 		}
 		quic_frame_put(frame);
 
 		if (!frame->transmitted)
-			continue;  /* It is already in queue for transmitting. */
+			continue;  /* Already in queue for transmitting. */
 
 		list_del_init(&frame->list);
 		/* Don't retransmit DATAGRAM or PING frames. */
-		if (quic_frame_dgram(frame->type) || quic_frame_ping(frame->type)) {
+		if (quic_frame_dgram(frame->type) ||
+		    quic_frame_ping(frame->type)) {
 			bytes += frame->bytes;
 			quic_frame_put(frame);
 			continue;
 		}
-		/* Clear transmitted bit and put it in queue for transmitting. */
+		/* Clear transmitted bit and enqueue for transmitting. */
 		frame->transmitted = 0;
 		quic_outq_retransmit_frame(sk, frame);
 	}
@@ -951,9 +1009,10 @@ static void quic_outq_psent_retransmit_frames(struct sock *sk, struct quic_packe
 
 /* rfc9002#section-a.10: DetectAndRemoveLostPackets()
  *
- * Identify and mark packets as lost in the specified packet number space.  This function scans
- * sent packets and moves those considered lost back to the send queue. It updates loss time,
- * congestion control state, inflight bytes, and the send window accordingly.
+ * Identify and mark packets as lost in the specified packet number space.
+ * This function scans sent packets and moves those considered lost back to the
+ * send queue. It updates loss time, congestion control state, inflight bytes,
+ * and the send window accordingly.
  */
 void quic_outq_retransmit_mark(struct sock *sk, u8 level, bool immediate)
 {
@@ -961,6 +1020,8 @@ void quic_outq_retransmit_mark(struct sock *sk, u8 level, bool immediate)
 	struct quic_outqueue *outq = quic_outq(sk);
 	struct quic_cong *cong = quic_cong(sk);
 	struct quic_packet_sent *sent, *next;
+	s64 max = space->max_pn_acked_seen;
+	u64 delay = cong->loss_delay;
 
 	space->loss_time = 0;
 	cong->time = quic_ktime_get_us();
@@ -973,21 +1034,24 @@ void quic_outq_retransmit_mark(struct sock *sk, u8 level, bool immediate)
 
 		/* rfc9002#section-6.1:
 		 *
-		 * A packet is declared lost if it meets all of the following conditions:
+		 * A packet is declared lost if it meets all of the following
+		 * conditions:
 		 *
-		 * - The packet is unacknowledged, and was sent prior to an acknowledged
-		 *   packet.
-		 * - The packet was sent kPacketThreshold packets before an acknowledged
-		 *   packet, or it was sent long enough (loss_delay) in the past.
+		 * - The packet is unacknowledged, and was sent prior to an
+		 *   acknowledged packet.
+		 * - The packet was sent kPacketThreshold packets before an
+		 *   acknowledged packet, or it was sent long enough
+		 *   (loss_delay) in the past.
 		 */
-		if (!immediate && sent->number > space->max_pn_acked_seen)
+		max = space->max_pn_acked_seen;
+		if (!immediate && sent->number > max)
 			break;
 
-		if (!immediate && sent->sent_time + cong->loss_delay > cong->time &&
-		    sent->number + QUIC_KPACKET_THRESHOLD > space->max_pn_acked_seen) {
+		if (!immediate && sent->sent_time + delay > cong->time &&
+		    sent->number + QUIC_KPACKET_THRESHOLD > max) {
 			if (!space->loss_time ||
-			    space->loss_time > sent->sent_time + cong->loss_delay)
-				space->loss_time = sent->sent_time + cong->loss_delay;
+			    space->loss_time > sent->sent_time + delay)
+				space->loss_time = sent->sent_time + delay;
 			break;
 		}
 
@@ -1006,8 +1070,8 @@ void quic_outq_retransmit_mark(struct sock *sk, u8 level, bool immediate)
 	}
 }
 
-/* Removes each frame from the list and queues it for retransmission.  Called when packet
- * construction fails using frames in the packet list.
+/* Removes each frame from the list and queues it for retransmission.  Called
+ * when packet construction fails using frames in the packet list.
  */
 void quic_outq_retransmit_list(struct sock *sk, struct list_head *head)
 {
@@ -1025,10 +1089,11 @@ void quic_outq_retransmit_list(struct sock *sk, struct list_head *head)
 
 /* rfc9002#section-a.9: OnLossDetectionTimeout()
  *
- * Handle Probe Timeout (PTO) expiration: This function is invoked when the loss detection timer
- * expires.  It attempts to retransmit frames contained in the lost packets if any are detected.
- * Otherwise, it sends probe packets to elicit acknowledgments and maintain connection liveness.
- * It also manages the PTO count and resets the loss timer.
+ * Handle Probe Timeout (PTO) expiration: This function is invoked when the
+ * loss detection timer expires.  It attempts to retransmit frames contained in
+ * the lost packets if any are detected.  Otherwise, it sends probe packets to
+ * elicit acknowledgments and maintain connection liveness.  It also manages
+ * the PTO count and resets the loss timer.
  */
 void quic_outq_transmit_pto(struct sock *sk)
 {
@@ -1037,11 +1102,11 @@ void quic_outq_transmit_pto(struct sock *sk)
 	u64 time;
 	u8 level;
 
-	/* Check if there is a loss time set and retransmit lost frames if so. */
+	/* Retransmit frames if any loss time set */
 	time = quic_outq_get_loss_time(sk, &level);
 	if (time) {
-		/* Move frames from lost packets back to the send queue, update the loss
-		 * detection timer, and retransmit the frames.
+		/* Move frames from lost packets back to the send queue, update
+		 * the loss detection timer, and retransmit the frames.
 		 */
 		quic_outq_retransmit_mark(sk, level, false);
 		quic_outq_update_loss_timer(sk);
@@ -1068,7 +1133,7 @@ void quic_outq_transmit_pto(struct sock *sk)
 
 out:
 	if (outq->pto_count < QUIC_MAX_PTO_COUNT)
-		outq->pto_count++; /* pto_count is used in quic_outq_get_pto_time(). */
+		outq->pto_count++; /* Used in quic_outq_get_pto_time(). */
 	quic_outq_update_loss_timer(sk);
 }
 
@@ -1086,11 +1151,12 @@ int quic_outq_probe_path_alt(struct sock *sk, bool cork)
 		if (quic_path_alt_state(paths, QUIC_PATH_ALT_PENDING))
 			return -EINVAL;
 
-		/* No alternate ID available; retire the old connection ID and request a new
-		 * connection ID to prepare for migration.
+		/* No alternate ID available; retire the old connection ID and
+		 * request a new connection ID to prepare for migration.
 		 */
 		number = quic_conn_id_first_number(id_set);
-		err = quic_outq_transmit_frame(sk, QUIC_FRAME_RETIRE_CONNECTION_ID,
+		err = quic_outq_transmit_frame(sk,
+					       QUIC_FRAME_RETIRE_CONNECTION_ID,
 					       &number, 0, cork);
 		if (err)
 			return err;
@@ -1102,15 +1168,16 @@ int quic_outq_probe_path_alt(struct sock *sk, bool cork)
 
 	/* Alternate connection ID selected; start active probing. */
 	quic_path_set_alt_state(paths, QUIC_PATH_ALT_PROBING);
-	quic_set_sk_ecn(sk, 0); /* Clear ECN counters to avoid mixing signals across paths. */
+	/* Clear ECN counters to avoid mixing signals across paths. */
+	quic_set_sk_ecn(sk, 0);
 	/* Send PATH_CHALLENGE frame on the new path and reset path timer. */
 	quic_outq_transmit_frame(sk, QUIC_FRAME_PATH_CHALLENGE, NULL, 1, cork);
 	quic_timer_reset_path(sk);
 	return 0;
 }
 
-/* Resets the path ID of all frames in the control and transmitted lists. Called after
- * connection migration is completed.
+/* Resets the path ID of all frames in the control and transmitted lists.
+ * Called after connection migration is completed.
  */
 void quic_outq_update_path(struct sock *sk)
 {
@@ -1126,10 +1193,11 @@ void quic_outq_update_path(struct sock *sk)
 
 /* Create and queue a QUIC control frame for transmission.
  *
- * This function creates a new quic_frame with the given type and data, sets the path for
- * the frame, and appends it to the control frame queue.
+ * This function creates a new quic_frame with the given type and data, sets
+ * the path for the frame, and appends it to the control frame queue.
  */
-int quic_outq_transmit_frame(struct sock *sk, u8 type, void *data, u8 path, bool cork)
+int quic_outq_transmit_frame(struct sock *sk, u8 type, void *data, u8 path,
+			     bool cork)
 {
 	struct quic_frame *frame;
 
@@ -1144,10 +1212,11 @@ int quic_outq_transmit_frame(struct sock *sk, u8 type, void *data, u8 path, bool
 
 /* Send NEW_CONNECTION_ID frames.
  *
- * This function sends multiple NEW_CONNECTION_ID frames for any connection IDs with
- * sequence numbers between (last known + 1) and (max_count + prior - 1).
+ * This function sends multiple NEW_CONNECTION_ID frames for any connection IDs
+ * with sequence numbers between (last known + 1) and (max_count + prior - 1).
  */
-int quic_outq_transmit_new_conn_id(struct sock *sk, u64 prior, u8 path, bool cork)
+int quic_outq_transmit_new_conn_id(struct sock *sk, u64 prior, u8 path,
+				   bool cork)
 {
 	struct quic_conn_id_set *id_set = quic_source(sk);
 	u64 max, seqno;
@@ -1155,9 +1224,10 @@ int quic_outq_transmit_new_conn_id(struct sock *sk, u64 prior, u8 path, bool cor
 
 	/* Compute the maximum sequence number to send. */
 	max = id_set->max_count + prior;
-	for (seqno = quic_conn_id_last_number(id_set) + 1; seqno < max; seqno++) {
-		err = quic_outq_transmit_frame(sk, QUIC_FRAME_NEW_CONNECTION_ID, &prior,
-					       path, true);
+	for (seqno = quic_conn_id_last_number(id_set) + 1; seqno < max;
+	     seqno++) {
+		err = quic_outq_transmit_frame(sk, QUIC_FRAME_NEW_CONNECTION_ID,
+					       &prior, path, true);
 		if (err)
 			return err;
 	}
@@ -1168,18 +1238,21 @@ int quic_outq_transmit_new_conn_id(struct sock *sk, u64 prior, u8 path, bool cor
 
 /* Send RETIRE_CONNECTION_ID frames.
  *
- * This function queues RETIRE_CONNECTION_ID frames for all sequence numbers from the first
- * known ID up to the specified prior sequence number.
+ * This function queues RETIRE_CONNECTION_ID frames for all sequence numbers
+ * from the first known ID up to the specified prior sequence number.
  */
-int quic_outq_transmit_retire_conn_id(struct sock *sk, u64 prior, u8 path, bool cork)
+int quic_outq_transmit_retire_conn_id(struct sock *sk, u64 prior, u8 path,
+				      bool cork)
 {
 	struct quic_conn_id_set *id_set = quic_dest(sk);
 	u64 seqno;
 	int err;
 
-	for (seqno = quic_conn_id_first_number(id_set); seqno < prior; seqno++) {
-		err = quic_outq_transmit_frame(sk, QUIC_FRAME_RETIRE_CONNECTION_ID, &seqno,
-					       path, cork);
+	for (seqno = quic_conn_id_first_number(id_set); seqno < prior;
+	     seqno++) {
+		err = quic_outq_transmit_frame(sk,
+					       QUIC_FRAME_RETIRE_CONNECTION_ID,
+					       &seqno, path, cork);
 		if (err)
 			return err;
 	}
@@ -1262,8 +1335,11 @@ static void quic_outq_psent_list_purge(struct sock *sk, struct list_head *head)
 	}
 }
 
-/* Purge frames from an outq list: only those for a given stream, or all if stream is NULL. */
-void quic_outq_list_purge(struct sock *sk, struct list_head *head, struct quic_stream *stream)
+/* Purge frames from an outq list: only those for a given stream, or all if
+ * stream is NULL.
+ */
+void quic_outq_list_purge(struct sock *sk, struct list_head *head,
+			  struct quic_stream *stream)
 {
 	struct quic_outqueue *outq = quic_outq(sk);
 	struct quic_frame *frame, *next;
