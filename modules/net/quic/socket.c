@@ -677,11 +677,13 @@ static int quic_msghdr_parse(struct sock *sk, struct msghdr *msg, struct quic_ha
 
 		switch (cmsg->cmsg_type) {
 		case QUIC_HANDSHAKE_INFO:
-			quic_copy_common(hinfo, sizeof(*hinfo), CMSG_DATA(cmsg), cmsg->cmsg_len);
+			quic_copy_common(hinfo, sizeof(*hinfo), CMSG_DATA(cmsg),
+					 cmsg->cmsg_len - CMSG_LEN(0));
 			*has_hinfo = true;
 			break;
 		case QUIC_STREAM_INFO:
-			quic_copy_common(sinfo, sizeof(*sinfo), CMSG_DATA(cmsg), cmsg->cmsg_len);
+			quic_copy_common(sinfo, sizeof(*sinfo), CMSG_DATA(cmsg),
+					 cmsg->cmsg_len - CMSG_LEN(0));
 			if (sinfo->stream_flags & ~QUIC_MSG_STREAM_FLAGS)
 				return -EINVAL;
 			has_sinfo = true;
