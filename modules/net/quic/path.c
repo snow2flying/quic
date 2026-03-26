@@ -27,7 +27,8 @@ static int quic_udp_rcv(struct sock *sk, struct sk_buff *skb)
 	skb_pull(skb, sizeof(struct udphdr));
 	skb_dst_force(skb);
 	quic_packet_rcv(sk, skb, false);
-	return 0; /* .encap_rcv must return 0 if skb was either consumed or dropped. */
+	/* .encap_rcv must return 0 if skb was either consumed or dropped. */
+	return 0;
 }
 
 static int quic_udp_err(struct sock *sk, struct sk_buff *skb)
@@ -37,17 +38,18 @@ static int quic_udp_err(struct sock *sk, struct sk_buff *skb)
 
 static void quic_udp_sock_put_work(struct work_struct *work)
 {
-	struct quic_udp_sock *us = container_of(work, struct quic_udp_sock, work);
+	struct quic_udp_sock *us = container_of(work, struct quic_udp_sock,
+						work);
 	struct quic_uhash_head *head;
 	struct sock *sk = us->sk;
 
-	/* Hold the sock to safely access it in quic_udp_sock_lookup() even after
-	 * udp_tunnel_sock_release(). The release must occur before __hlist_del()
-	 * so a new UDP tunnel socket can be created for the same address and port
-	 * if quic_udp_sock_lookup() fails to find one.
+	/* Hold the sock to safely access it in quic_udp_sock_lookup() even
+	 * after udp_tunnel_sock_release(). The release must occur before
+	 * __hlist_del() so a new UDP tunnel socket can be created for the same
+	 * address and port if quic_udp_sock_lookup() fails to find one.
 	 *
-	 * Note: udp_tunnel_sock_release() cannot be called under the mutex due to
-	 * some lockdep warnings.
+	 * Note: udp_tunnel_sock_release() cannot be called under the mutex due
+	 * to some lockdep warnings.
 	 */
 	sock_hold(sk);
 	udp_tunnel_sock_release(sk->sk_socket);
@@ -61,7 +63,8 @@ static void quic_udp_sock_put_work(struct work_struct *work)
 	kfree(us);
 }
 
-static struct quic_udp_sock *quic_udp_sock_create(struct sock *sk, union quic_addr *a)
+static struct quic_udp_sock *quic_udp_sock_create(struct sock *sk,
+						  union quic_addr *a)
 {
 	struct udp_tunnel_sock_cfg tuncfg = {};
 	struct udp_port_cfg udp_conf = {};
@@ -107,18 +110,20 @@ static bool quic_udp_sock_get(struct quic_udp_sock *us)
 
 static void quic_udp_sock_put(struct quic_udp_sock *us)
 {
-	/* The UDP socket may be freed in atomic RX context during connection migration;
-	 * defer the release to a workqueue.
+	/* The UDP socket may be freed in atomic RX context during connection
+	 * migration; defer the release to a workqueue.
 	 */
 	if (refcount_dec_and_test(&us->refcnt))
 		queue_work(quic_wq, &us->work);
 }
 
-/* Lookup a quic_udp_sock in the global hash table by port or address.  If 'a' is provided, it
- * searches for a socket whose local address matches 'a' and, if applicable, matches the device
- * binding. If 'a' is NULL, it searches only by port.
+/* Lookup a quic_udp_sock in the global hash table by port or address.  If 'a'
+ * is provided, it searches for a socket whose local address matches 'a' and,
+ * if applicable, matches the device binding. If 'a' is NULL, it searches only
+ * by port.
  */
-static struct quic_udp_sock *quic_udp_sock_lookup(struct sock *sk, union quic_addr *a, u16 port)
+static struct quic_udp_sock *quic_udp_sock_lookup(struct sock *sk,
+						  union quic_addr *a, u16 port)
 {
 	struct net *net = sock_net(sk);
 	struct quic_uhash_head *head;
@@ -141,7 +146,8 @@ static struct quic_udp_sock *quic_udp_sock_lookup(struct sock *sk, union quic_ad
 	return NULL;
 }
 
-static void quic_path_set_udp_sk(struct quic_path *path, struct quic_udp_sock *us)
+static void quic_path_set_udp_sk(struct quic_path *path,
+				 struct quic_udp_sock *us)
 {
 	if (path->udp_sk)
 		quic_udp_sock_put(path->udp_sk);
@@ -237,10 +243,10 @@ int quic_path_bind(struct sock *sk, struct quic_path_group *paths, u8 path)
 
 /* Swaps the active and alternate QUIC paths.
  *
- * Promotes the alternate path (path[1]) to become the new active path (path[0]).  If the
- * alternate path has a valid UDP socket, the entire path is swapped.  Otherwise, only the
- * destination address is exchanged, assuming the source address is the same and no rebind is
- * needed.
+ * Promotes the alternate path (path[1]) to become the new active path
+ * (path[0]).  If the alternate path has a valid UDP socket, the entire path is
+ * swapped.  Otherwise, only the destination address is exchanged, assuming the
+ * source address is the same and no rebind is needed.
  *
  * This is typically used during path migration or alternate path promotion.
  */
@@ -263,7 +269,8 @@ void quic_path_swap(struct quic_path_group *paths)
 
 /* Frees resources associated with a QUIC path.
  *
- * This is used for cleanup during error handling or when the path is no longer needed.
+ * This is used for cleanup during error handling or when the path is no longer
+ * needed.
  */
 void quic_path_unbind(struct sock *sk, struct quic_path_group *paths, u8 path)
 {
@@ -278,20 +285,24 @@ void quic_path_unbind(struct sock *sk, struct quic_path_group *paths, u8 path)
 
 /* Detects and records a potential alternate path.
  *
- * If the new source or destination address differs from the active path, and alternate path
- * detection is not disabled, the function updates the alternate path slot (path[1]) with the
- * new addresses.
+ * If the new source or destination address differs from the active path, and
+ * alternate path detection is not disabled, the function updates the alternate
+ * path slot (path[1]) with the new addresses.
  *
- * This is typically called on packet receive to detect new possible network paths (e.g., NAT
- * rebinding, mobility).
+ * This is typically called on packet receive to detect new possible network
+ * paths (e.g., NAT rebinding, mobility).
  *
- * Returns true if a new alternate path was detected and updated, false otherwise.
+ * Returns true if a new alternate path was detected and updated, false
+ * otherwise.
  */
 bool quic_path_detect_alt(struct quic_path_group *paths, union quic_addr *sa,
 			  union quic_addr *da, struct sock *sk)
 {
-	if ((!quic_cmp_sk_addr(sk, quic_path_saddr(paths, 0), sa) && !paths->disable_saddr_alt) ||
-	    (!quic_cmp_sk_addr(sk, quic_path_daddr(paths, 0), da) && !paths->disable_daddr_alt)) {
+	union quic_addr *saddr = quic_path_saddr(paths, 0);
+	union quic_addr *daddr = quic_path_daddr(paths, 0);
+
+	if ((!quic_cmp_sk_addr(sk, saddr, sa) && !paths->disable_saddr_alt) ||
+	    (!quic_cmp_sk_addr(sk, daddr, da) && !paths->disable_daddr_alt)) {
 		if (!quic_path_saddr(paths, 1)->v4.sin_port)
 			quic_path_set_saddr(paths, 1, sa);
 
@@ -306,7 +317,8 @@ bool quic_path_detect_alt(struct quic_path_group *paths, union quic_addr *sa,
 	return false;
 }
 
-void quic_path_get_param(struct quic_path_group *paths, struct quic_transport_param *p)
+void quic_path_get_param(struct quic_path_group *paths,
+			 struct quic_transport_param *p)
 {
 	if (p->remote) {
 		p->disable_active_migration = paths->disable_saddr_alt;
@@ -315,7 +327,8 @@ void quic_path_get_param(struct quic_path_group *paths, struct quic_transport_pa
 	p->disable_active_migration = paths->disable_daddr_alt;
 }
 
-void quic_path_set_param(struct quic_path_group *paths, struct quic_transport_param *p)
+void quic_path_set_param(struct quic_path_group *paths,
+			 struct quic_transport_param *p)
 {
 	if (p->remote) {
 		paths->disable_saddr_alt = p->disable_active_migration;
@@ -344,10 +357,11 @@ enum quic_plpmtud_state {
 
 /* Handle PLPMTUD probe failure on a QUIC path.
  *
- * Called immediately after sending a probe packet in QUIC Path MTU Discovery.  Tracks probe
- * count and manages state transitions based on the number of probes sent and current PLPMTUD
- * state (BASE, SEARCH, COMPLETE, ERROR).  Detects probe failures and black holes, adjusting
- * PMTU and probe sizes accordingly.
+ * Called immediately after sending a probe packet in QUIC Path MTU Discovery.
+ * Tracks probe count and manages state transitions based on the number of
+ * probes sent and current PLPMTUD state (BASE, SEARCH, COMPLETE, ERROR).
+ * Detects probe failures and black holes, adjusting PMTU and probe sizes
+ * accordingly.
  *
  * Return: New PMTU value if updated, else 0.
  */
@@ -361,15 +375,17 @@ u32 quic_path_pl_send(struct quic_path_group *paths, s64 number)
 
 	paths->pl.probe_count = 0;
 	if (paths->pl.state == QUIC_PL_BASE) {
-		if (paths->pl.probe_size == QUIC_BASE_PLPMTU) { /* BASE_PLPMTU Confirming Failed */
-			paths->pl.state = QUIC_PL_ERROR; /* Base -> Error */
+		if (paths->pl.probe_size == QUIC_BASE_PLPMTU) {
+			/* BASE_PLPMTU Confirming Failed: Base -> Error. */
+			paths->pl.state = QUIC_PL_ERROR;
 
 			paths->pl.pmtu = QUIC_BASE_PLPMTU;
 			pathmtu = QUIC_BASE_PLPMTU;
 		}
 	} else if (paths->pl.state == QUIC_PL_SEARCH) {
-		if (paths->pl.pmtu == paths->pl.probe_size) { /* Black Hole Detected */
-			paths->pl.state = QUIC_PL_BASE;  /* Search -> Base */
+		if (paths->pl.pmtu == paths->pl.probe_size) {
+			/* Black Hole Detected: Search -> Base. */
+			paths->pl.state = QUIC_PL_BASE;
 			paths->pl.probe_size = QUIC_BASE_PLPMTU;
 			paths->pl.probe_high = 0;
 
@@ -380,8 +396,9 @@ u32 quic_path_pl_send(struct quic_path_group *paths, s64 number)
 			paths->pl.probe_size = paths->pl.pmtu;
 		}
 	} else if (paths->pl.state == QUIC_PL_COMPLETE) {
-		if (paths->pl.pmtu == paths->pl.probe_size) { /* Black Hole Detected */
-			paths->pl.state = QUIC_PL_BASE;  /* Search Complete -> Base */
+		if (paths->pl.pmtu == paths->pl.probe_size) {
+			/* Black Hole Detected:  Search Complete -> Base. */
+			paths->pl.state = QUIC_PL_BASE;
 			paths->pl.probe_size = QUIC_BASE_PLPMTU;
 
 			/* probe_high already reset when entering COMPLETE. */
@@ -391,26 +408,30 @@ u32 quic_path_pl_send(struct quic_path_group *paths, s64 number)
 	}
 
 out:
-	pr_debug("%s: dst: %p, state: %d, pmtu: %d, size: %d, high: %d\n", __func__, paths,
-		 paths->pl.state, paths->pl.pmtu, paths->pl.probe_size, paths->pl.probe_high);
+	pr_debug("%s: dst: %p, state: %d, pmtu: %d, size: %d, high: %d\n",
+		 __func__, paths, paths->pl.state, paths->pl.pmtu,
+		 paths->pl.probe_size, paths->pl.probe_high);
 	paths->pl.probe_count++;
 	return pathmtu;
 }
 
 /* Handle successful reception of a PMTU probe.
  *
- * Called when a probe packet is acknowledged. Updates probe size and transitions state if
- * needed (e.g., from SEARCH to COMPLETE).  Expands PMTU using binary or linear search
- * depending on state.
+ * Called when a probe packet is acknowledged. Updates probe size and
+ * transitions state if needed (e.g., from SEARCH to COMPLETE).  Expands PMTU
+ * using binary or linear search depending on state.
  *
  * Return: New PMTU to apply if search completes, or 0 if no change.
  */
-u32 quic_path_pl_recv(struct quic_path_group *paths, bool *raise_timer, bool *complete)
+u32 quic_path_pl_recv(struct quic_path_group *paths, bool *raise_timer,
+		      bool *complete)
 {
 	u32 pathmtu = 0;
+	u16 next;
 
-	pr_debug("%s: dst: %p, state: %d, pmtu: %d, size: %d, high: %d\n", __func__, paths,
-		 paths->pl.state, paths->pl.pmtu, paths->pl.probe_size, paths->pl.probe_high);
+	pr_debug("%s: dst: %p, state: %d, pmtu: %d, size: %d, high: %d\n",
+		 __func__, paths, paths->pl.state, paths->pl.pmtu,
+		 paths->pl.probe_size, paths->pl.probe_high);
 
 	*raise_timer = false;
 	paths->pl.number = 0;
@@ -428,9 +449,9 @@ u32 quic_path_pl_recv(struct quic_path_group *paths, bool *raise_timer, bool *co
 	} else if (paths->pl.state == QUIC_PL_SEARCH) {
 		if (!paths->pl.probe_high) {
 			if (paths->pl.probe_size < QUIC_MAX_PLPMTU) {
+				next = paths->pl.probe_size + QUIC_PL_BIG_STEP;
 				paths->pl.probe_size =
-					(u16)min(paths->pl.probe_size + QUIC_PL_BIG_STEP,
-						 QUIC_MAX_PLPMTU);
+					min_t(u16, next, QUIC_MAX_PLPMTU);
 				*complete = false;
 				return pathmtu;
 			}
@@ -439,17 +460,20 @@ u32 quic_path_pl_recv(struct quic_path_group *paths, bool *raise_timer, bool *co
 		paths->pl.probe_size += QUIC_PL_MIN_STEP;
 		if (paths->pl.probe_size >= paths->pl.probe_high) {
 			paths->pl.probe_high = 0;
-			paths->pl.state = QUIC_PL_COMPLETE; /* Search -> Search Complete */
+			/* Search -> Search Complete */
+			paths->pl.state = QUIC_PL_COMPLETE;
 
 			paths->pl.probe_size = paths->pl.pmtu;
 			pathmtu = (u32)paths->pl.pmtu;
 			*raise_timer = true;
 		}
 	} else if (paths->pl.state == QUIC_PL_COMPLETE) {
-		/* Raise probe_size again after 30 * interval in Search Complete */
-		paths->pl.state = QUIC_PL_SEARCH; /* Search Complete -> Search */
-		paths->pl.probe_size = (u16)min(paths->pl.probe_size + QUIC_PL_MIN_STEP,
-						QUIC_MAX_PLPMTU);
+		/* Raise probe_size after 30 * interval in Search Complete;
+		 * Search Complete -> Search.
+		 */
+		paths->pl.state = QUIC_PL_SEARCH;
+		next = paths->pl.probe_size + QUIC_PL_MIN_STEP;
+		paths->pl.probe_size = min_t(u16, next, QUIC_MAX_PLPMTU);
 	}
 
 	*complete = (paths->pl.state == QUIC_PL_COMPLETE);
@@ -458,18 +482,20 @@ u32 quic_path_pl_recv(struct quic_path_group *paths, bool *raise_timer, bool *co
 
 /* Handle ICMP "Packet Too Big" messages.
  *
- * Responds to an incoming ICMP error by reducing the probe size or falling back to a safe
- * baseline PMTU depending on current state.  Also handles cases where the PMTU hint lies
- * between probe and current PMTU.
+ * Responds to an incoming ICMP error by reducing the probe size or falling
+ * back to a safe baseline PMTU depending on current state.  Also handles cases
+ * where the PMTU hint lies between probe and current PMTU.
  *
  * Return: New PMTU to apply if state changes, or 0 if no change.
  */
-u32 quic_path_pl_toobig(struct quic_path_group *paths, u32 pmtu, bool *reset_timer)
+u32 quic_path_pl_toobig(struct quic_path_group *paths, u32 pmtu,
+			bool *reset_timer)
 {
 	u32 pathmtu = 0;
 
-	pr_debug("%s: dst: %p, state: %d, pmtu: %d, size: %d, ptb: %d\n", __func__, paths,
-		 paths->pl.state, paths->pl.pmtu, paths->pl.probe_size, pmtu);
+	pr_debug("%s: dst: %p, state: %d, pmtu: %d, size: %d, ptb: %d\n",
+		 __func__, paths, paths->pl.state, paths->pl.pmtu,
+		 paths->pl.probe_size, pmtu);
 
 	*reset_timer = false;
 	if (pmtu < QUIC_MIN_PLPMTU || pmtu >= (u32)paths->pl.probe_size)
@@ -491,7 +517,8 @@ u32 quic_path_pl_toobig(struct quic_path_group *paths, u32 pmtu, bool *reset_tim
 			paths->pl.probe_high = 0;
 			paths->pl.pmtu = QUIC_BASE_PLPMTU;
 			pathmtu = QUIC_BASE_PLPMTU;
-		} else if (pmtu > (u32)paths->pl.pmtu && pmtu < (u32)paths->pl.probe_size) {
+		} else if (pmtu > (u32)paths->pl.pmtu &&
+			   pmtu < (u32)paths->pl.probe_size) {
 			paths->pl.probe_size = (u16)pmtu;
 			paths->pl.probe_count = 0;
 		}
@@ -512,8 +539,8 @@ u32 quic_path_pl_toobig(struct quic_path_group *paths, u32 pmtu, bool *reset_tim
 
 /* Reset PLPMTUD state for a path.
  *
- * Resets all PLPMTUD-related state to its initial configuration.  Called when a new path is
- * initialized or when recovering from errors.
+ * Resets all PLPMTUD-related state to its initial configuration.  Called when
+ * a new path is initialized or when recovering from errors.
  */
 void quic_path_pl_reset(struct quic_path_group *paths)
 {
@@ -527,12 +554,14 @@ void quic_path_pl_reset(struct quic_path_group *paths)
 
 /* Check if a packet number confirms PLPMTUD probe.
  *
- * Checks whether the last probe (tracked by .number) has been acknowledged.  If the probe
- * number lies within the ACK range, confirmation is successful.
+ * Checks whether the last probe (tracked by .number) has been acknowledged.
+ * If the probe number lies within the ACK range, confirmation is successful.
  *
  * Return: true if probe is confirmed, false otherwise.
  */
-bool quic_path_pl_confirm(struct quic_path_group *paths, s64 largest, s64 smallest)
+bool quic_path_pl_confirm(struct quic_path_group *paths, s64 largest,
+			  s64 smallest)
 {
-	return paths->pl.number && paths->pl.number >= smallest && paths->pl.number <= largest;
+	return paths->pl.number && paths->pl.number >= smallest &&
+	       paths->pl.number <= largest;
 }
