@@ -4,7 +4,7 @@
 #
 
 menuconfig IP_QUIC
-	tristate "QUIC: A UDP-Based Multiplexed and Secure Transport (Experimental)"
+	tristate "QUIC: A UDP-Based Multiplexed Secure Transport (Experimental)"
 	depends on INET
 	depends on IPV6
 	select CRYPTO
