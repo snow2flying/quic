@@ -37,8 +37,8 @@ struct quic_crypto {
 	struct quic_cipher *cipher;    /* Cipher info (selected cipher suite) */
 	u32 cipher_type; /* Cipher suite (e.g., AES_GCM_128, etc.) */
 
-	u8 tx_secret[QUIC_SECRET_LEN]; /* TX secret (derived or from user) */
-	u8 rx_secret[QUIC_SECRET_LEN]; /* RX secret (derived or from user) */
+	u8 tx_secret[2][QUIC_SECRET_LEN]; /* TX secret (key phase 0 and 1) */
+	u8 rx_secret[2][QUIC_SECRET_LEN]; /* RX secret (key phase 0 and 1) */
 	u8 tx_iv[2][QUIC_IV_LEN];      /* IVs for TX (key phase 0 and 1) */
 	u8 rx_iv[2][QUIC_IV_LEN];      /* IVs for RX (key phase 0 and 1) */
 

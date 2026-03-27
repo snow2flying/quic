@@ -1892,16 +1892,6 @@ static int quic_packet_app_process(struct sock *sk, struct sk_buff *skb)
 			return err;
 		}
 		QUIC_INC_STATS(net, QUIC_MIB_PKT_DECDROP);
-		if (cb->key_update) {
-			/* Notify application of the key update with new key
-			 * phase even if the decryption failed, as the new key
-			 * has been installed.
-			 */
-			key_phase = cb->key_phase;
-			quic_inq_event_recv(sk, QUIC_EVENT_KEY_UPDATE,
-					    &key_phase, sizeof(key_phase));
-			goto err;
-		}
 		/* Not from key update: propagate error to close connection. */
 		packet->errcode = cb->errcode;
 		goto err;

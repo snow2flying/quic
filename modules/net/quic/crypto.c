@@ -172,32 +172,34 @@ static int quic_crypto_keys_derive(struct crypto_shash *tfm,
  * optionally header protection key.
  */
 static int quic_crypto_keys_derive_and_install(struct quic_crypto *crypto,
-					       bool rx)
+					       bool rx, u8 phase)
 {
 	struct quic_data srt = {}, k, iv, hp_k = {}, *hp = NULL;
 	u8 key[QUIC_KEY_LEN], hp_key[QUIC_KEY_LEN] = {};
-	int err, phase = crypto->key_phase;
 	u32 keylen, ivlen = QUIC_IV_LEN;
 	struct crypto_skcipher *hp_tfm;
 	struct crypto_aead *tfm;
+	int err;
 
 	keylen = crypto->cipher->keylen;
 	quic_data(&k, key, keylen);
 
 	if (rx) {
-		quic_data(&srt, crypto->rx_secret, crypto->cipher->secretlen);
+		quic_data(&srt, crypto->rx_secret[phase],
+			  crypto->cipher->secretlen);
 		quic_data(&iv, crypto->rx_iv[phase], ivlen);
 		tfm = crypto->rx_tfm[phase];
 		hp_tfm = crypto->rx_hp_tfm;
 	} else {
-		quic_data(&srt, crypto->tx_secret, crypto->cipher->secretlen);
+		quic_data(&srt, crypto->tx_secret[phase],
+			  crypto->cipher->secretlen);
 		quic_data(&iv, crypto->tx_iv[phase], ivlen);
 		tfm = crypto->tx_tfm[phase];
 		hp_tfm = crypto->tx_hp_tfm;
 	}
 
 	/* Only derive header protection key when not in key update. */
-	if (!crypto->key_pending)
+	if (crypto->key_phase == phase)
 		hp = quic_data(&hp_k, hp_key, keylen);
 	err = quic_crypto_keys_derive(crypto->secret_tfm, &srt, &k, &iv, hp,
 				      crypto->version);
@@ -644,6 +646,15 @@ int quic_crypto_decrypt(struct quic_crypto *crypto, struct sk_buff *skb)
 	}
 
 out:
+	/* rfc9001#section-6.2:
+	 *
+	 * If a packet is successfully processed using the next key and IV,
+	 * then the peer has initiated a key update.
+	 */
+	if (cb->key_update) {
+		crypto->key_pending = 1;
+		crypto->key_phase = !crypto->key_phase;
+	}
 	/* rfc9001#section-6.1:
 	 *
 	 * An endpoint MUST retain old keys until it has successfully
@@ -741,6 +752,7 @@ int quic_crypto_set_secret(struct quic_crypto *crypto,
 			   struct quic_crypto_secret *srt,
 			   u32 version, u32 flag)
 {
+	u8 phase = crypto->key_phase;
 	struct quic_cipher *cipher;
 	int err;
 
@@ -755,8 +767,9 @@ int quic_crypto_set_secret(struct quic_crypto *crypto,
 	/* Handle RX path setup. */
 	if (!srt->send) {
 		crypto->version = version;
-		memcpy(crypto->rx_secret, srt->secret, cipher->secretlen);
-		err = quic_crypto_keys_derive_and_install(crypto, true);
+		memcpy(crypto->rx_secret[phase], srt->secret,
+		       cipher->secretlen);
+		err = quic_crypto_keys_derive_and_install(crypto, true, phase);
 		if (err)
 			return err;
 		crypto->recv_ready = 1;
@@ -765,8 +778,8 @@ int quic_crypto_set_secret(struct quic_crypto *crypto,
 
 	/* Handle TX path setup. */
 	crypto->version = version;
-	memcpy(crypto->tx_secret, srt->secret, cipher->secretlen);
-	err = quic_crypto_keys_derive_and_install(crypto, false);
+	memcpy(crypto->tx_secret[phase], srt->secret, cipher->secretlen);
+	err = quic_crypto_keys_derive_and_install(crypto, false, phase);
 	if (err)
 		return err;
 	crypto->send_ready = 1;
@@ -777,12 +790,14 @@ EXPORT_SYMBOL_GPL(quic_crypto_set_secret);
 int quic_crypto_get_secret(struct quic_crypto *crypto,
 			   struct quic_crypto_secret *srt)
 {
+	u8 phase = crypto->key_phase;
 	u8 *secret;
 
 	if (!crypto->cipher)
 		return -EINVAL;
 	srt->type = crypto->cipher_type;
-	secret = srt->send ? crypto->tx_secret : crypto->rx_secret;
+	secret = srt->send ? crypto->tx_secret[phase] :
+			     crypto->rx_secret[phase];
 	memcpy(srt->secret, secret, crypto->cipher->secretlen);
 	return 0;
 }
@@ -790,8 +805,8 @@ int quic_crypto_get_secret(struct quic_crypto *crypto,
 /* Initiating a Key Update. */
 int quic_crypto_key_update(struct quic_crypto *crypto)
 {
-	u8 tx_secret[QUIC_SECRET_LEN], rx_secret[QUIC_SECRET_LEN];
 	struct quic_data l = {KU_LABEL_V1, strlen(KU_LABEL_V1)};
+	u8 phase = crypto->key_phase;
 	struct quic_data k, srt;
 	u32 secret_len;
 	int err;
@@ -818,38 +833,21 @@ int quic_crypto_key_update(struct quic_crypto *crypto)
 	if (crypto->version == QUIC_VERSION_V2)
 		quic_data(&l, KU_LABEL_V2, strlen(KU_LABEL_V2));
 
-	crypto->key_pending = 1;
-	memcpy(tx_secret, crypto->tx_secret, secret_len);
-	memcpy(rx_secret, crypto->rx_secret, secret_len);
-	crypto->key_phase = !crypto->key_phase;
-
-	quic_data(&srt, tx_secret, secret_len);
-	quic_data(&k, crypto->tx_secret, secret_len);
+	quic_data(&srt, crypto->tx_secret[phase], secret_len);
+	quic_data(&k, crypto->tx_secret[!phase], secret_len);
 	err = quic_crypto_hkdf_expand(crypto->secret_tfm, &srt, &l, &k);
 	if (err)
-		goto err;
-	err = quic_crypto_keys_derive_and_install(crypto, false);
+		return err;
+	err = quic_crypto_keys_derive_and_install(crypto, false, !phase);
 	if (err)
-		goto err;
+		return err;
 
-	quic_data(&srt, rx_secret, secret_len);
-	quic_data(&k, crypto->rx_secret, secret_len);
+	quic_data(&srt, crypto->rx_secret[phase], secret_len);
+	quic_data(&k, crypto->rx_secret[!phase], secret_len);
 	err = quic_crypto_hkdf_expand(crypto->secret_tfm, &srt, &l, &k);
 	if (err)
-		goto err;
-	err = quic_crypto_keys_derive_and_install(crypto, true);
-	if (err)
-		goto err;
-out:
-	memzero_explicit(tx_secret, sizeof(tx_secret));
-	memzero_explicit(rx_secret, sizeof(rx_secret));
-	return err;
-err:
-	crypto->key_pending = 0;
-	memcpy(crypto->tx_secret, tx_secret, secret_len);
-	memcpy(crypto->rx_secret, rx_secret, secret_len);
-	crypto->key_phase = !crypto->key_phase;
-	goto out;
+		return err;
+	return quic_crypto_keys_derive_and_install(crypto, true, !phase);
 }
 EXPORT_SYMBOL_GPL(quic_crypto_key_update);
 

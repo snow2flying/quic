@@ -1847,7 +1847,7 @@ static int quic_sock_set_connection_close(struct sock *sk,
 }
 
 static int quic_sock_connection_migrate(struct sock *sk, struct sockaddr *addr,
-					int addr_len)
+					u32 addr_len)
 {
 	struct quic_path_group *paths = quic_paths(sk);
 	union quic_addr a;
@@ -1903,6 +1903,20 @@ static int quic_sock_connection_migrate(struct sock *sk, struct sockaddr *addr,
 err:
 	quic_path_unbind(sk, paths, 1); /* Cleanup path 1 on failure. */
 	return err;
+}
+
+static int quic_sock_key_update(struct sock *sk, void *kopt, u32 optlen)
+{
+	struct quic_crypto *crypto = quic_crypto(sk, QUIC_CRYPTO_APP);
+	int err;
+
+	err = quic_crypto_key_update(crypto);
+	if (err)
+		return err;
+
+	crypto->key_pending = 1;
+	crypto->key_phase = !crypto->key_phase;
+	return 0;
 }
 
 /* Validate and copy QUIC transport parameters. */
@@ -2320,8 +2334,7 @@ int quic_do_setsockopt(struct sock *sk, int optname, sockptr_t optval,
 		retval = quic_sock_connection_migrate(sk, kopt, optlen);
 		break;
 	case QUIC_SOCKOPT_KEY_UPDATE:
-		retval = quic_crypto_key_update(quic_crypto(sk,
-							    QUIC_CRYPTO_APP));
+		retval = quic_sock_key_update(sk, kopt, optlen);
 		break;
 	case QUIC_SOCKOPT_TRANSPORT_PARAM:
 		retval = quic_sock_set_transport_param(sk, kopt, optlen);
