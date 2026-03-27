@@ -402,8 +402,8 @@ static int quic_init_sock(struct sock *sk)
 	sk_sockets_allocated_inc(sk);
 	sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
 
-	quic_conn_id_set_init(quic_source(sk), 1);
-	quic_conn_id_set_init(quic_dest(sk), 0);
+	quic_conn_id_set_init(quic_source(sk), true);
+	quic_conn_id_set_init(quic_dest(sk), false);
 	quic_cong_init(quic_cong(sk));
 
 	quic_sock_apply_transport_param(sk, p);
