@@ -192,9 +192,9 @@ begin:
 			break;
 		}
 	}
-	/* If the nulls value we got at the end of the iteration is different
-	 * from the expected one, we must restart the lookup as the list was
-	 * modified concurrently.
+	/* If the final nulls value differs from the expected one, restart the
+	 * lookup as the node may have been rehashed (e.g., due to connection
+	 * migration).
 	 */
 	if (!sk && get_nulls_value(node) != hash)
 		goto begin;
@@ -234,7 +234,6 @@ struct sock *quic_listen_sock_lookup(struct sk_buff *skb, union quic_addr *sa,
 	head = quic_listen_sock_head(hash);
 
 	rcu_read_lock();
-begin:
 	if (!alpns->len) { /* No ALPNs or parse failed */
 		sk_nulls_for_each_rcu(tmp, node, &head->head) {
 			/* If alpns->data != NULL, TLS parsing succeeded but no
@@ -251,6 +250,9 @@ begin:
 					break; /* Prefer specific addr match. */
 			}
 		}
+		/* No need to check get_nulls_value(node) != hash for !sk, as
+		 * hashtable size is fixed and a listen sk can not rehashed.
+		 */
 		goto out;
 	}
 
@@ -270,17 +272,13 @@ begin:
 					break;
 			}
 		}
+		/* No need to check get_nulls_value(node) != hash for !sk, as
+		 * hashtable size is fixed and a listen sk can not rehashed.
+		 */
 		if (sk)
 			break;
 	}
 out:
-	/* If the nulls value we got at the end of the iteration is different
-	 * from the expected one, we must restart the lookup as the list was
-	 * modified concurrently.
-	 */
-	if (!sk && get_nulls_value(node) != hash)
-		goto begin;
-
 	if (sk && sk->sk_reuseport)
 		sk = reuseport_select_sock(sk, quic_addr_hash(net, da), skb, 1);
 
