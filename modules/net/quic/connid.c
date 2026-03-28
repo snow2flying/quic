@@ -36,6 +36,9 @@ struct quic_conn_id *quic_conn_id_lookup(struct net *net, u8 *scid, u32 len)
 			conn_id = &s_conn_id->common.id;
 		break;
 	}
+	/* No need to check get_nulls_value(node) != hash for !conn_id, as
+	 * hashtable size is fixed and a conn_id can not rehashed.
+	 */
 	return conn_id;
 }
 
