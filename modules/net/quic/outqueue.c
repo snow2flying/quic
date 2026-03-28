@@ -1264,10 +1264,8 @@ int quic_outq_transmit_retire_conn_id(struct sock *sk, u64 prior, u8 path,
 /* Configure outqueue from transport parameters. */
 void quic_outq_set_param(struct sock *sk, struct quic_transport_param *p)
 {
-	struct quic_packet *packet = quic_packet(sk);
 	struct quic_outqueue *outq = quic_outq(sk);
 	struct quic_cong *cong = quic_cong(sk);
-	u32 pmtu;
 
 	if (!p->remote)
 		return;
@@ -1287,10 +1285,11 @@ void quic_outq_set_param(struct sock *sk, struct quic_transport_param *p)
 	cong->max_window = min_t(u64, outq->max_data, S32_MAX / 2);
 	cong->max_ack_delay = outq->max_ack_delay;
 
-	if (quic_packet_route(sk))
-		return;
-	pmtu = min_t(u32, dst_mtu(__sk_dst_get(sk)), QUIC_PATH_MAX_PMTU);
-	quic_packet_mss_update(sk, pmtu - packet->hlen);
+	/* max_datagram_frame_size or max_udp_payload_size changed; reset
+	 * socket route so quic_packet_route() recalculates MSS.
+	 */
+	__sk_dst_reset(sk);
+	quic_packet_route(sk);
 }
 
 /* Populate transport parameters from outqueue. */
