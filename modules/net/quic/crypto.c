@@ -247,7 +247,7 @@ static void *quic_crypto_skcipher_mem_alloc(struct crypto_skcipher *tfm,
 	*iv = (u8 *)PTR_ALIGN(mem + mask_size,
 			      crypto_skcipher_alignmask(tfm) + 1);
 	*req = (struct skcipher_request *)PTR_ALIGN(*iv + iv_size,
-			crypto_tfm_ctx_alignment());
+						    crypto_tfm_ctx_alignment());
 
 	return (void *)mem;
 }
@@ -392,9 +392,9 @@ static void *quic_crypto_aead_mem_alloc(struct crypto_aead *tfm, u32 ctx_size,
 
 	*iv = (u8 *)PTR_ALIGN(mem + ctx_size, crypto_aead_alignmask(tfm) + 1);
 	*req = (struct aead_request *)PTR_ALIGN(*iv + iv_size,
-			crypto_tfm_ctx_alignment());
+						crypto_tfm_ctx_alignment());
 	*sg = (struct scatterlist *)PTR_ALIGN((u8 *)*req + req_size,
-			__alignof__(struct scatterlist));
+					      __alignof__(struct scatterlist));
 
 	return (void *)mem;
 }
