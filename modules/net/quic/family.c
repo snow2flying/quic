@@ -256,7 +256,7 @@ static int quic_v6_get_mtu_info(struct sk_buff *skb, u32 *info)
 	struct icmp6hdr *hdr;
 
 	hdr = (struct icmp6hdr *)(skb_network_header(skb) -
-	      sizeof(struct icmp6hdr));
+				  sizeof(struct icmp6hdr));
 	if (hdr->icmp6_type == ICMPV6_PKT_TOOBIG) {
 		*info = ntohl(hdr->icmp6_mtu);
 		return 0;
