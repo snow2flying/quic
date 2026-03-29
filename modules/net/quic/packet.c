@@ -1857,10 +1857,6 @@ static int quic_packet_app_process(struct sock *sk, struct sk_buff *skb)
 	cb->number_offset = QUIC_CONN_ID_DEF_LEN + QUIC_HLEN;
 	cb->length = (u16)(skb->len - cb->number_offset);
 
-	/* Set highest received PN for PN decode during decryption. */
-	cb->number = space->max_pn_seen;
-	cb->crypto_done = quic_packet_decrypt_done;
-
 	/* draft-banks-quic-disable-encryption#section-2.1:
 	 *
 	 * Advertising the disable_1rtt_encryption transport parameter
@@ -1878,6 +1874,13 @@ static int quic_packet_app_process(struct sock *sk, struct sk_buff *skb)
 	 * completion.
 	 */
 	WARN_ON_ONCE(!skb_set_owner_sk_safe(skb, sk));
+
+	/* Set highest received PN for PN decode during decryption if packet
+	 * number will be reconstructed in quic_crypto_decrypt().
+	 */
+	if (cb->resume || !cb->number_len)
+		cb->number = space->max_pn_seen;
+	cb->crypto_done = quic_packet_decrypt_done;
 	err = quic_crypto_decrypt(crypto, skb); /* Do packet decryption. */
 	if (err) {
 		if (err == -EINPROGRESS) {
