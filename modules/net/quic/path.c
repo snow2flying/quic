@@ -135,8 +135,7 @@ static struct quic_udp_sock *quic_udp_sock_lookup(struct sock *sk,
 			continue;
 		if (a) {
 			if (quic_cmp_sk_addr(us->sk, &us->addr, a) &&
-			    (!us->bind_ifindex || !sk->sk_bound_dev_if ||
-			     us->bind_ifindex == sk->sk_bound_dev_if))
+			    us->bind_ifindex == sk->sk_bound_dev_if)
 				return us;
 			continue;
 		}
