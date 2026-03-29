@@ -51,14 +51,17 @@ bool quic_conn_id_token_exists(struct quic_conn_id_set *id_set, u8 *token)
 	struct quic_dest_conn_id *dcid;
 
 	dcid = (struct quic_dest_conn_id *)id_set->active;
-	if (!memcmp(dcid->token, token, QUIC_CONN_ID_TOKEN_LEN))
+	/* DCID with seqno 0 does not carry a stateless reset token. */
+	if (dcid->common.number &&
+	    !memcmp(dcid->token, token, QUIC_CONN_ID_TOKEN_LEN))
 		return true; /* Fast path. */
 
 	list_for_each_entry(common, &id_set->head, list) {
 		dcid = (struct quic_dest_conn_id *)common;
 		if (common == id_set->active)
 			continue;
-		if (!memcmp(dcid->token, token, QUIC_CONN_ID_TOKEN_LEN))
+		if (dcid->common.number &&
+		    !memcmp(dcid->token, token, QUIC_CONN_ID_TOKEN_LEN))
 			return true;
 	}
 	return false;
