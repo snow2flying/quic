@@ -45,7 +45,6 @@ static void quic_v4_udp_conf_init(struct sock *sk, struct udp_port_cfg *conf,
 	conf->family = AF_INET;
 	conf->local_ip.s_addr = a->v4.sin_addr.s_addr;
 	conf->local_udp_port = a->v4.sin_port;
-	conf->use_udp6_rx_checksums = true;
 	conf->bind_ifindex = sk->sk_bound_dev_if;
 }
 
@@ -56,6 +55,7 @@ static void quic_v6_udp_conf_init(struct sock *sk, struct udp_port_cfg *conf,
 	conf->local_ip6 = a->v6.sin6_addr;
 	conf->local_udp_port = a->v6.sin6_port;
 	conf->use_udp6_rx_checksums = true;
+	conf->use_udp6_tx_checksums = true;
 	conf->ipv6_v6only = ipv6_only_sock(sk);
 	conf->bind_ifindex = sk->sk_bound_dev_if;
 }
