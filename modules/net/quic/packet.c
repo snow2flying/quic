@@ -1038,12 +1038,21 @@ static int quic_packet_listen_process(struct sock *sk, struct sk_buff *skb)
 			consume_skb(skb);
 			return err;
 		}
+
+		/* Distinguish token source: Retry packet or NEW_TOKEN frame. */
+		retry = *(u8 *)token.data == QUIC_TOKEN_FLAG_RETRY;
+
 		/* Verify Token. */
 		crypto = quic_crypto(sk, QUIC_CRYPTO_INITIAL);
 		err = quic_crypto_verify_token(crypto, &packet->daddr,
 					       sizeof(packet->daddr),
 					       &odcid, token.data, token.len);
 		if (err) {
+			if (!retry) {
+				err = quic_packet_retry_create_and_xmit(sk);
+				consume_skb(skb);
+				return err;
+			}
 			/* rfc9000#section-8.1.3:
 			 *
 			 * If a server receives a client Initial that contains
@@ -1057,8 +1066,6 @@ static int quic_packet_listen_process(struct sock *sk, struct sk_buff *skb)
 			consume_skb(skb);
 			return err;
 		}
-		/* Distinguish token source: Retry packet or NEW_TOKEN frame. */
-		retry = *(u8 *)token.data == QUIC_TOKEN_FLAG_RETRY;
 	}
 
 	/* Add request sock for this new QUIC connection. */
