@@ -293,10 +293,14 @@ static void quic_write_space(struct sock *sk)
 	__poll_t mask = EPOLLOUT | EPOLLWRNORM | EPOLLWRBAND;
 	struct socket_wq *wq;
 
+	/* Do not check sock_writeable(). Also wakes stream-open waiters
+	 * blocked on stream limits, where sock_writeable() may be false.
+	 */
 	rcu_read_lock();
 	wq = rcu_dereference(sk->sk_wq);
 	if (skwq_has_sleeper(wq))
 		wake_up_interruptible_sync_poll(&wq->wait, mask);
+	sk_wake_async_rcu(sk, SOCK_WAKE_SPACE, POLL_OUT);
 	rcu_read_unlock();
 }
 
