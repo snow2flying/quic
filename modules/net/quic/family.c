@@ -404,17 +404,11 @@ static bool quic_v4_cmp_sk_addr(struct sock *sk, union quic_addr *a,
 
 static bool quic_v4_match_v6_addr(union quic_addr *a4, union quic_addr *a6)
 {
-	__be32 addr;
-
 	if (ipv6_addr_any(&a6->v6.sin6_addr))
 		return true;
-	if (ipv6_addr_v4mapped(&a6->v6.sin6_addr)) {
-		addr = a6->v6.sin6_addr.s6_addr32[3];
-		if (addr == htonl(INADDR_ANY) ||
-		    a4->v4.sin_addr.s_addr == htonl(INADDR_ANY))
-			return true;
-		return addr == a4->v4.sin_addr.s_addr;
-	}
+	if (ipv6_addr_v4mapped(&a6->v6.sin6_addr) &&
+	    a6->v6.sin6_addr.s6_addr32[3] == a4->v4.sin_addr.s_addr)
+		return true;
 	return false;
 }
 
