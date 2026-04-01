@@ -212,7 +212,7 @@ void quic_packet_rcv_err_pmtu(struct sock *sk)
 	struct dst_entry *dst;
 	bool reset_timer;
 
-	if (!ip_sk_accept_pmtu(sk))
+	if (!quic_sk_accept_pmtu(sk))
 		return;
 
 	info = clamp(paths->mtu_info, QUIC_PATH_MIN_PMTU, QUIC_PATH_MAX_PMTU);
