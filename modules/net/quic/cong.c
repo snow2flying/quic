@@ -575,7 +575,7 @@ static void quic_cong_pto_update(struct quic_cong *cong)
  */
 static void quic_cong_update_pacing_time(struct quic_cong *cong, u32 bytes)
 {
-	u64 prior_time, credit, len_ns, rate = READ_ONCE(cong->pacing_rate);
+	u64 prior_time, credit, len_ns, rate = cong->pacing_rate;
 
 	if (!rate)
 		return;
@@ -605,7 +605,7 @@ static void quic_cong_pace_update(struct quic_cong *cong, u32 bytes,
 	rate = div64_ul((u64)cong->window * USEC_PER_SEC * 2,
 			cong->smoothed_rtt);
 
-	WRITE_ONCE(cong->pacing_rate, min_t(u64, rate, max_rate));
+	cong->pacing_rate = min_t(u64, rate, max_rate);
 	pr_debug("%s: update pacing rate: %llu, max rate: %llu, srtt: %u\n",
 		 __func__, cong->pacing_rate, max_rate, cong->smoothed_rtt);
 }
