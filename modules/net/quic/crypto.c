@@ -355,7 +355,8 @@ static int quic_crypto_header_protect(struct crypto_skcipher *tfm,
 		 QUIC_LONG_HEADER_MASK : QUIC_SHORT_HEADER_MASK;
 	*p = (u8)(*p ^ (mask[0] & h_mask));
 	if (!enc) {
-		cb->key_phase = quic_hdr(skb)->key;
+		if (!quic_hdr(skb)->form)
+			cb->key_phase = quic_hdr(skb)->key;
 		cb->number_len = quic_hdr(skb)->pnl + 1;
 	}
 	p += cb->number_offset;
@@ -438,7 +439,8 @@ static int quic_crypto_payload_protect(struct crypto_aead *tfm,
 		if (err < 0)
 			return err;
 		pskb_put(skb, trailer, QUIC_TAG_LEN);
-		quic_hdr(skb)->key = cb->key_phase;
+		if (!quic_hdr(skb)->form)
+			quic_hdr(skb)->key = cb->key_phase;
 		sglen = skb->len;
 		nsg = (u32)err;
 	} else {
