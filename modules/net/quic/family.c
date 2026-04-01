@@ -85,6 +85,9 @@ static int quic_v4_flow_route(struct sock *sk, union quic_addr *da,
 	fl4->flowi4_tos = ip_sock_rt_tos(sk);
 #endif
 
+	fl4->flowi4_uid = sk_uid(sk);
+	fl4->flowi4_mark = sk->sk_mark;
+
 	rt = ip_route_output_key(sock_net(sk), fl4);
 	if (IS_ERR(rt))
 		return PTR_ERR(rt);
@@ -130,6 +133,9 @@ static int quic_v6_flow_route(struct sock *sk, union quic_addr *da,
 			fl6_sock_release(flowlabel);
 		}
 	}
+
+	fl6->flowi6_uid = sk_uid(sk);
+	fl6->flowi6_mark = sk->sk_mark;
 
 	dst = ip6_dst_lookup_flow(sock_net(sk), sk, fl6, NULL);
 	if (IS_ERR(dst))
