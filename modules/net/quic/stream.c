@@ -253,7 +253,7 @@ struct quic_stream *quic_stream_get(struct quic_stream_table *streams,
 
 	stream = quic_stream_create(streams, stream_id, send, is_serv);
 	if (!stream)
-		return ERR_PTR(-ENOSTR);
+		return ERR_PTR(-ENOMEM);
 
 	if (send || quic_stream_id_valid(stream_id, is_serv, !send))
 		streams->send.active_stream_id = stream_id;

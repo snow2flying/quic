@@ -1018,8 +1018,8 @@ static int quic_frame_stream_error(struct quic_stream *stream,
 {
 	int err = PTR_ERR(stream);
 
-	if (err == -ENOSTR) /* Stream already released. */
-		return 0;
+	if (err == -ENOSTR || err == -ENOMEM)
+		return 0; /* Stream gone or memory allocation failed; ignore. */
 	if (err == -EAGAIN)
 		frame->errcode = QUIC_TRANSPORT_ERROR_STREAM_LIMIT;
 	else
