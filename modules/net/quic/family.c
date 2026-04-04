@@ -133,6 +133,7 @@ static int quic_v6_flow_route(struct sock *sk, union quic_addr *da,
 			fl6_sock_release(flowlabel);
 		}
 	}
+	fl6->flowlabel = ip6_make_flowinfo(np->tclass, fl6->flowlabel);
 
 	fl6->flowi6_uid = sk_uid(sk);
 	fl6->flowi6_mark = sk->sk_mark;
