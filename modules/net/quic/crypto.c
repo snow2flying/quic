@@ -224,6 +224,43 @@ out:
 	return err;
 }
 
+#define QUIC_CIPHER_MIN TLS_CIPHER_AES_GCM_128
+#define QUIC_CIPHER_MAX TLS_CIPHER_CHACHA20_POLY1305
+
+#define TLS_CIPHER_AES_GCM_128_SECRET_SIZE		32
+#define TLS_CIPHER_AES_GCM_256_SECRET_SIZE		48
+#define TLS_CIPHER_AES_CCM_128_SECRET_SIZE		32
+#define TLS_CIPHER_CHACHA20_POLY1305_SECRET_SIZE	32
+
+#define CIPHER_DESC(type, aead_n, skc_n, sha_n)[type - QUIC_CIPHER_MIN] = { \
+	.secretlen = type ## _SECRET_SIZE, \
+	.keylen = type ## _KEY_SIZE, \
+	.aead = aead_n, \
+	.skc = skc_n, \
+	.shash = sha_n, \
+}
+
+static struct quic_cipher ciphers[QUIC_CIPHER_MAX + 1 - QUIC_CIPHER_MIN] = {
+	CIPHER_DESC(TLS_CIPHER_AES_GCM_128,
+		    "gcm(aes)", "ecb(aes)", "hmac(sha256)"),
+	CIPHER_DESC(TLS_CIPHER_AES_GCM_256,
+		    "gcm(aes)", "ecb(aes)", "hmac(sha384)"),
+	CIPHER_DESC(TLS_CIPHER_AES_CCM_128,
+		    "ccm(aes)", "ecb(aes)", "hmac(sha256)"),
+	CIPHER_DESC(TLS_CIPHER_CHACHA20_POLY1305,
+		    "rfc7539(chacha20,poly1305)", "chacha20", "hmac(sha256)"),
+};
+
+static bool quic_crypto_is_cipher_ccm(struct quic_crypto *crypto)
+{
+	return crypto->cipher_type == TLS_CIPHER_AES_CCM_128;
+}
+
+static bool quic_crypto_is_cipher_chacha(struct quic_crypto *crypto)
+{
+	return crypto->cipher_type == TLS_CIPHER_CHACHA20_POLY1305;
+}
+
 static void *quic_crypto_skcipher_mem_alloc(struct crypto_skcipher *tfm,
 					    u32 mask_size, u8 **iv,
 					    struct skcipher_request **req)
@@ -283,24 +320,28 @@ static int quic_crypto_get_number(struct sk_buff *skb)
 #define QUIC_SHORT_HEADER_MASK	0x1f
 
 /* Header Protection. */
-static int quic_crypto_header_protect(struct crypto_skcipher *tfm,
-				      struct sk_buff *skb, bool chacha,
-				      bool enc)
+static int quic_crypto_header_protect(struct quic_crypto *crypto,
+				      struct sk_buff *skb, bool enc)
 {
 	struct quic_skb_cb *cb = QUIC_SKB_CB(skb);
+	u8 *mask, *iv, *p, h_mask, chacha;
 	struct skcipher_request *req;
-	u8 *mask, *iv, *p, h_mask;
+	struct crypto_skcipher *tfm;
 	struct sk_buff *trailer;
 	struct scatterlist sg;
 	int err, i;
 
+	chacha = quic_crypto_is_cipher_chacha(crypto);
 	if (!enc) {
+		tfm = crypto->rx_hp_tfm;
 		if (cb->length < QUIC_PN_MAX_LEN + QUIC_SAMPLE_LEN)
 			return -EINVAL;
 
 		err = skb_cow_data(skb, 0, &trailer);
 		if (err < 0)
 			return err;
+	} else {
+		tfm = crypto->tx_hp_tfm;
 	}
 
 	mask = quic_crypto_skcipher_mem_alloc(tfm, QUIC_SAMPLE_LEN, &iv, &req);
@@ -418,32 +459,38 @@ static void quic_crypto_done(void *data, int err)
 }
 
 /* AEAD Usage. */
-static int quic_crypto_payload_protect(struct crypto_aead *tfm,
-				       struct sk_buff *skb, u8 *base_iv,
-				       bool ccm, bool enc)
+static int quic_crypto_payload_protect(struct quic_crypto *crypto,
+				       struct sk_buff *skb, bool enc)
 {
+	u8 *base_iv, *iv, i, nonce[QUIC_IV_LEN], ccm, phase;
 	struct quic_skb_cb *cb = QUIC_SKB_CB(skb);
-	u8 *iv, i, nonce[QUIC_IV_LEN];
 	u32 len, hlen, sglen, nsg;
 	struct aead_request *req;
+	struct crypto_aead *tfm;
 	struct sk_buff *trailer;
 	struct scatterlist *sg;
 	void *ctx;
 	__be64 n;
 	int err;
 
+	ccm = quic_crypto_is_cipher_ccm(crypto);
+	phase = cb->key_phase;
 	hlen = cb->number_offset + cb->number_len;
 	if (enc) {
+		tfm = crypto->tx_tfm[phase];
+		base_iv = crypto->tx_iv[phase];
 		len = skb->len;
 		err = skb_cow_data(skb, QUIC_TAG_LEN, &trailer);
 		if (err < 0)
 			return err;
 		pskb_put(skb, trailer, QUIC_TAG_LEN);
 		if (!quic_hdr(skb)->form)
-			quic_hdr(skb)->key = cb->key_phase;
+			quic_hdr(skb)->key = phase;
 		sglen = skb->len;
 		nsg = (u32)err;
 	} else {
+		tfm = crypto->rx_tfm[phase];
+		base_iv = crypto->rx_iv[phase];
 		len = cb->length + cb->number_offset;
 		if (len - hlen < QUIC_TAG_LEN)
 			return -EINVAL;
@@ -499,43 +546,6 @@ err:
 	return err;
 }
 
-#define QUIC_CIPHER_MIN TLS_CIPHER_AES_GCM_128
-#define QUIC_CIPHER_MAX TLS_CIPHER_CHACHA20_POLY1305
-
-#define TLS_CIPHER_AES_GCM_128_SECRET_SIZE		32
-#define TLS_CIPHER_AES_GCM_256_SECRET_SIZE		48
-#define TLS_CIPHER_AES_CCM_128_SECRET_SIZE		32
-#define TLS_CIPHER_CHACHA20_POLY1305_SECRET_SIZE	32
-
-#define CIPHER_DESC(type, aead_n, skc_n, sha_n)[type - QUIC_CIPHER_MIN] = { \
-	.secretlen = type ## _SECRET_SIZE, \
-	.keylen = type ## _KEY_SIZE, \
-	.aead = aead_n, \
-	.skc = skc_n, \
-	.shash = sha_n, \
-}
-
-static struct quic_cipher ciphers[QUIC_CIPHER_MAX + 1 - QUIC_CIPHER_MIN] = {
-	CIPHER_DESC(TLS_CIPHER_AES_GCM_128,
-		    "gcm(aes)", "ecb(aes)", "hmac(sha256)"),
-	CIPHER_DESC(TLS_CIPHER_AES_GCM_256,
-		    "gcm(aes)", "ecb(aes)", "hmac(sha384)"),
-	CIPHER_DESC(TLS_CIPHER_AES_CCM_128,
-		    "ccm(aes)", "ecb(aes)", "hmac(sha256)"),
-	CIPHER_DESC(TLS_CIPHER_CHACHA20_POLY1305,
-		    "rfc7539(chacha20,poly1305)", "chacha20", "hmac(sha256)"),
-};
-
-static bool quic_crypto_is_cipher_ccm(struct quic_crypto *crypto)
-{
-	return crypto->cipher_type == TLS_CIPHER_AES_CCM_128;
-}
-
-static bool quic_crypto_is_cipher_chacha(struct quic_crypto *crypto)
-{
-	return crypto->cipher_type == TLS_CIPHER_CHACHA20_POLY1305;
-}
-
 /* Encrypts a QUIC packet before transmission.  This function performs AEAD
  * encryption of the packet payload and applies header protection. It handles
  * key phase tracking and key update timing.
@@ -544,12 +554,10 @@ static bool quic_crypto_is_cipher_chacha(struct quic_crypto *crypto)
  */
 int quic_crypto_encrypt(struct quic_crypto *crypto, struct sk_buff *skb)
 {
-	u8 *iv, cha, ccm, phase = crypto->key_phase;
 	struct quic_skb_cb *cb = QUIC_SKB_CB(skb);
 	int err;
 
-	cb->key_phase = phase;
-	iv = crypto->tx_iv[phase];
+	cb->key_phase = crypto->key_phase;
 	/* Packet payload is already encrypted (e.g., resumed from async),
 	 * proceed to header protection only.
 	 */
@@ -563,14 +571,11 @@ int quic_crypto_encrypt(struct quic_crypto *crypto, struct sk_buff *skb)
 	if (crypto->key_pending && !crypto->key_update_send_time)
 		crypto->key_update_send_time = quic_ktime_get_us();
 
-	ccm = quic_crypto_is_cipher_ccm(crypto);
-	err = quic_crypto_payload_protect(crypto->tx_tfm[phase], skb, iv, ccm,
-					  true);
+	err = quic_crypto_payload_protect(crypto, skb, true);
 	if (err)
 		return err;
 out:
-	cha = quic_crypto_is_cipher_chacha(crypto);
-	return quic_crypto_header_protect(crypto->tx_hp_tfm, skb, cha, true);
+	return quic_crypto_header_protect(crypto, skb, true);
 }
 EXPORT_SYMBOL_GPL(quic_crypto_encrypt);
 
@@ -583,9 +588,9 @@ EXPORT_SYMBOL_GPL(quic_crypto_encrypt);
 int quic_crypto_decrypt(struct quic_crypto *crypto, struct sk_buff *skb)
 {
 	struct quic_skb_cb *cb = QUIC_SKB_CB(skb);
-	u8 *iv, cha, ccm, phase;
 	int err = 0;
 	u64 time;
+	u8 phase;
 
 	/* Payload was decrypted asynchronously.  Proceed with parsing packet
 	 * number and key phase.
@@ -597,9 +602,7 @@ int quic_crypto_decrypt(struct quic_crypto *crypto, struct sk_buff *skb)
 		goto out;
 	}
 	if (!cb->number_len) { /* Packet header not yet decrypted. */
-		cha = quic_crypto_is_cipher_chacha(crypto);
-		err = quic_crypto_header_protect(crypto->rx_hp_tfm, skb, cha,
-						 false);
+		err = quic_crypto_header_protect(crypto, skb, false);
 		if (err) {
 			pr_debug("%s: hd decrypt err %d\n", __func__, err);
 			return err;
@@ -613,10 +616,11 @@ int quic_crypto_decrypt(struct quic_crypto *crypto, struct sk_buff *skb)
 	 * the change. An endpoint that notices a changed Key Phase bit updates
 	 * keys and decrypts the packet that contains the changed value.
 	 */
-	if (cb->key_phase != crypto->key_phase && !crypto->key_pending) {
+	phase = cb->key_phase;
+	if (phase != crypto->key_phase && !crypto->key_pending) {
 		if (!crypto->send_ready) /* Not ready for key update. */
 			return -EINVAL;
-		if (!cb->backlog) /* Key update requires process context */
+		if (!cb->backlog) /* Key update requires process context. */
 			return -EKEYREVOKED;
 		err = quic_crypto_key_update(crypto); /* Perform key update. */
 		if (err) {
@@ -626,11 +630,7 @@ int quic_crypto_decrypt(struct quic_crypto *crypto, struct sk_buff *skb)
 		cb->key_update = 1; /* Mark packet as triggering key update. */
 	}
 
-	phase = cb->key_phase;
-	iv = crypto->rx_iv[phase];
-	ccm = quic_crypto_is_cipher_ccm(crypto);
-	err = quic_crypto_payload_protect(crypto->rx_tfm[phase], skb, iv, ccm,
-					  false);
+	err = quic_crypto_payload_protect(crypto, skb, false);
 	if (err) {
 		if (err == -EINPROGRESS)
 			return err;
@@ -639,7 +639,7 @@ int quic_crypto_decrypt(struct quic_crypto *crypto, struct sk_buff *skb)
 		 * key_pending so that next packets will trigger the new
 		 * key-update.
 		 */
-		if (crypto->key_pending && cb->key_phase != crypto->key_phase) {
+		if (crypto->key_pending && phase != crypto->key_phase) {
 			crypto->key_pending = 0;
 			crypto->key_update_time = 0;
 			crypto->key_update_send_time = 0;
