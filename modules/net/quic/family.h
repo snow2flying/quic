@@ -43,6 +43,9 @@ int quic_get_sk_addr(struct socket *sock, struct sockaddr *a, int peer);
 void quic_set_sk_addr(struct sock *sk, union quic_addr *a, bool src);
 void quic_set_sk_ecn(struct sock *sk, u8 ecn);
 
+int quic_get_dev_if(struct sock *sk, union quic_addr *a);
+void quic_set_skb_iif(struct sk_buff *skb);
+
 int quic_common_setsockopt(struct sock *sk, int level, int optname,
 			   sockptr_t optval, unsigned int optlen);
 int quic_common_getsockopt(struct sock *sk, int level, int optname,

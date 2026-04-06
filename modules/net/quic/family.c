@@ -57,7 +57,7 @@ static void quic_v6_udp_conf_init(struct sock *sk, struct udp_port_cfg *conf,
 	conf->use_udp6_rx_checksums = true;
 	conf->use_udp6_tx_checksums = true;
 	conf->ipv6_v6only = ipv6_only_sock(sk);
-	conf->bind_ifindex = sk->sk_bound_dev_if;
+	conf->bind_ifindex = quic_get_dev_if(sk, a);
 }
 
 static int quic_v4_flow_route(struct sock *sk, union quic_addr *da,
@@ -76,7 +76,7 @@ static int quic_v4_flow_route(struct sock *sk, union quic_addr *da,
 	fl4->daddr = da->v4.sin_addr.s_addr;
 	fl4->fl4_dport = da->v4.sin_port;
 	fl4->flowi4_proto = IPPROTO_UDP;
-	fl4->flowi4_oif = sk->sk_bound_dev_if;
+	fl4->flowi4_oif = quic_get_dev_if(sk, da);
 
 	fl4->flowi4_scope = ip_sock_rt_scope(sk);
 #ifdef flowi4_dscp
@@ -119,7 +119,7 @@ static int quic_v6_flow_route(struct sock *sk, union quic_addr *da,
 	fl6->daddr = da->v6.sin6_addr;
 	fl6->fl6_dport = da->v6.sin6_port;
 	fl6->flowi6_proto = IPPROTO_UDP;
-	fl6->flowi6_oif = sk->sk_bound_dev_if;
+	fl6->flowi6_oif = quic_get_dev_if(sk, da);
 
 #ifdef inet6_test_bit
 	if (inet6_test_bit(SNDFLOW, sk)) {
@@ -150,6 +150,8 @@ static int quic_v6_flow_route(struct sock *sk, union quic_addr *da,
 	if (quic_v6_is_any_addr(sa)) {
 		sa->v6.sin6_family = AF_INET6;
 		sa->v6.sin6_addr = fl6->saddr;
+		if ((ipv6_addr_type(&fl6->saddr) & IPV6_ADDR_LINKLOCAL))
+			sa->v6.sin6_scope_id = fl6->flowi6_oif;
 	}
 	ip6_dst_store(sk, dst, false, false);
 	return 0;
@@ -242,10 +244,12 @@ static void quic_v6_get_msg_addrs(struct sk_buff *skb, union quic_addr *da,
 	sa->v6.sin6_family = AF_INET6;
 	sa->v6.sin6_port = uh->source;
 	sa->v6.sin6_addr = ipv6_hdr(skb)->saddr;
+	sa->v6.sin6_scope_id = skb->skb_iif;
 
 	da->v6.sin6_family = AF_INET6;
 	da->v6.sin6_port = uh->dest;
 	da->v6.sin6_addr = ipv6_hdr(skb)->daddr;
+	da->v6.sin6_scope_id = skb->skb_iif;
 }
 
 static int quic_v4_get_mtu_info(struct sk_buff *skb, u32 *info)
@@ -305,6 +309,7 @@ static int quic_v6_get_addr_from_user(struct sock *sk, union quic_addr *a,
 				      struct sockaddr *addr, int addr_len)
 {
 	u32 len = sizeof(struct sockaddr_in);
+	union quic_addr *ua;
 	int type;
 
 	if (addr_len < len)
@@ -319,9 +324,23 @@ static int quic_v6_get_addr_from_user(struct sock *sk, union quic_addr *a,
 	len = sizeof(struct sockaddr_in6);
 	if (addr_len < len)
 		return -EINVAL;
-	type = ipv6_addr_type(&quic_addr(addr)->v6.sin6_addr);
+	ua = quic_addr(addr);
+	type = ipv6_addr_type(&ua->v6.sin6_addr);
 	if (type != IPV6_ADDR_ANY && !(type & IPV6_ADDR_UNICAST))
 		return -EINVAL;
+
+	if (type & IPV6_ADDR_LINKLOCAL) {
+		if (!ua->v6.sin6_scope_id)
+			return -EINVAL;
+
+		rcu_read_lock();
+		if (!dev_get_by_index_rcu(sock_net(sk), ua->v6.sin6_scope_id)) {
+			rcu_read_unlock();
+			return -EINVAL;
+		}
+		rcu_read_unlock();
+	}
+
 	memcpy(a, addr, len);
 	return 0;
 }
@@ -449,7 +468,13 @@ static bool quic_v6_cmp_sk_addr(struct sock *sk, union quic_addr *a,
 	if (ipv6_addr_any(&a->v6.sin6_addr) ||
 	    ipv6_addr_any(&addr->v6.sin6_addr))
 		return true;
-	return ipv6_addr_equal(&a->v6.sin6_addr, &addr->v6.sin6_addr);
+	if (!ipv6_addr_equal(&a->v6.sin6_addr, &addr->v6.sin6_addr))
+		return false;
+	if ((ipv6_addr_type(&a->v6.sin6_addr) & IPV6_ADDR_LINKLOCAL) &&
+	    a->v6.sin6_scope_id && addr->v6.sin6_scope_id &&
+	    a->v6.sin6_scope_id != addr->v6.sin6_scope_id)
+		return false;
+	return true;
 }
 
 static int quic_v4_get_sk_addr(struct socket *sock, struct sockaddr *uaddr,
@@ -642,6 +667,21 @@ void quic_set_sk_ecn(struct sock *sk, u8 ecn)
 {
 	quic_pf_ipv4(sk) ? quic_v4_set_sk_ecn(sk, ecn) :
 			   quic_v6_set_sk_ecn(sk, ecn);
+}
+
+int quic_get_dev_if(struct sock *sk, union quic_addr *a)
+{
+	if (!quic_af_ipv4(a) &&
+	    ipv6_addr_type(&a->v6.sin6_addr) & IPV6_ADDR_LINKLOCAL)
+		return a->v6.sin6_scope_id;
+
+	return sk->sk_bound_dev_if;
+}
+
+void quic_set_skb_iif(struct sk_buff *skb)
+{
+	/* Save the inet/inet6 iif before skb dst/cb are cleared. */
+	skb->skb_iif = quic_skb_ipv4(skb) ? inet_iif(skb) : inet6_iif(skb);
 }
 
 int quic_common_setsockopt(struct sock *sk, int level, int optname,

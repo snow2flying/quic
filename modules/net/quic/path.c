@@ -20,6 +20,8 @@
 
 static int quic_udp_rcv(struct sock *sk, struct sk_buff *skb)
 {
+	quic_set_skb_iif(skb);
+
 	memset(skb->cb, 0, sizeof(skb->cb));
 	QUIC_SKB_CB(skb)->seqno = -1;
 	QUIC_SKB_CB(skb)->time = quic_ktime_get_us();
@@ -94,7 +96,7 @@ static struct quic_udp_sock *quic_udp_sock_create(struct sock *sk,
 	refcount_set(&us->refcnt, 1);
 	us->sk = sock->sk;
 	memcpy(&us->addr, a, sizeof(*a));
-	us->bind_ifindex = sk->sk_bound_dev_if;
+	us->bind_ifindex = udp_conf.bind_ifindex;
 
 	head = quic_udp_sock_head(net, ntohs(a->v4.sin_port));
 	hlist_add_head(&us->node, &head->head);
@@ -135,7 +137,7 @@ static struct quic_udp_sock *quic_udp_sock_lookup(struct sock *sk,
 			continue;
 		if (a) {
 			if (quic_cmp_sk_addr(us->sk, &us->addr, a) &&
-			    us->bind_ifindex == sk->sk_bound_dev_if)
+			    us->bind_ifindex == quic_get_dev_if(sk, a))
 				return us;
 			continue;
 		}
