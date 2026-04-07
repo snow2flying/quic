@@ -367,18 +367,16 @@ static int getopt_port(int sockfd, uint16_t port)
 static int getopt_connection_close(int sockfd, uint32_t errcode, uint8_t frame,
 				   char *phrase)
 {
-	struct quic_connection_close *info;
+	struct quic_connection_close info = {};
 	unsigned int optlen;
 
-	info = (struct quic_connection_close *)msg;
-	optlen = sizeof(msg);
-	memset(msg, 0, optlen);
-	if (getopt_pass(sockfd, QUIC_SOCKOPT_CONNECTION_CLOSE, msg, &optlen))
+	optlen = sizeof(info);
+	if (getopt_pass(sockfd, QUIC_SOCKOPT_CONNECTION_CLOSE, &info, &optlen))
 		return -1;
-	if (info->errcode != errcode || info->frame != frame ||
-	    strcmp((char *)info->phrase, phrase)) {
+	if (info.errcode != errcode || info.frame != frame ||
+	    strcmp((char *)info.phrase, phrase)) {
 		printf("%s: errcode=%u frame=%d phrase=%s\n", __func__,
-		       info->errcode, info->frame, info->phrase);
+		       info.errcode, info.frame, info.phrase);
 		return -1;
 	}
 	return 0;
@@ -1847,7 +1845,7 @@ static int test_notification(int connectfd, int acceptfd)
 
 static int test_close(int connectfd, int acceptfd)
 {
-	struct quic_connection_close *info;
+	struct quic_connection_close info = {};
 	struct quic_event_option event;
 
 	printf("=> Close Tests\n");
@@ -1858,31 +1856,11 @@ static int test_close(int connectfd, int acceptfd)
 		return -1;
 	printf("[] Close event enabled\n");
 
-	info = (struct quic_connection_close *)msg;
-	info->errcode = 10;
-	info->frame = 1;
-	snprintf((char *)info->phrase, sizeof(msg) - sizeof(*info),
-		 "this is app err");
-	if (setopt_fail(acceptfd, QUIC_SOCKOPT_CONNECTION_CLOSE, info,
-			sizeof(*info) + strlen((char *)info->phrase)))
-		return -1;
-	printf("[] Reject close info: phrase not null-terminated\n");
-
-	info = (struct quic_connection_close *)msg;
-	info->errcode = 10;
-	info->frame = 1;
-	if (setopt_fail(acceptfd, QUIC_SOCKOPT_CONNECTION_CLOSE, info,
-			sizeof(*info) - 1))
-		return -1;
-	printf("[] Reject close info: buffer too small\n");
-
-	info = (struct quic_connection_close *)msg;
-	info->errcode = 10;
-	info->frame = 1;
-	snprintf((char *)info->phrase, sizeof(msg) - sizeof(*info),
-		 "this is app err");
-	if (setopt_pass(connectfd, QUIC_SOCKOPT_CONNECTION_CLOSE, info,
-			sizeof(*info) + strlen((char *)info->phrase) + 1))
+	info.errcode = 10;
+	info.frame = 1;
+	snprintf((char *)info.phrase, sizeof(info.phrase), "this is app err");
+	if (setopt_pass(connectfd, QUIC_SOCKOPT_CONNECTION_CLOSE, &info,
+			sizeof(info)))
 		return -1;
 	printf("[] Close info set on local socket\n");
 
