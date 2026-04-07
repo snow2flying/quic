@@ -182,33 +182,6 @@ static __poll_t quic_inet_poll(struct file *file, struct socket *sock,
 	return mask;
 }
 
-static struct ctl_table quic_table[] = {
-	{
-		.procname	= "quic_mem",
-		.data		= &sysctl_quic_mem,
-		.maxlen		= sizeof(sysctl_quic_mem),
-		.mode		= 0644,
-		.proc_handler	= proc_doulongvec_minmax
-	},
-	{
-		.procname	= "quic_rmem",
-		.data		= &sysctl_quic_rmem,
-		.maxlen		= sizeof(sysctl_quic_rmem),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-	{
-		.procname	= "quic_wmem",
-		.data		= &sysctl_quic_wmem,
-		.maxlen		= sizeof(sysctl_quic_wmem),
-		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
-	},
-#ifndef register_sysctl
-	{ /* sentinel */ }
-#endif
-};
-
 struct quic_net *quic_net(struct net *net)
 {
 	return net_generic(net, quic_net_id);
@@ -615,6 +588,33 @@ static struct pernet_operations quic_net_ops = {
 
 #if IS_ENABLED(CONFIG_SYSCTL)
 static struct ctl_table_header *quic_sysctl_header;
+
+static struct ctl_table quic_table[] = {
+	{
+		.procname	= "quic_mem",
+		.data		= &sysctl_quic_mem,
+		.maxlen		= sizeof(sysctl_quic_mem),
+		.mode		= 0644,
+		.proc_handler	= proc_doulongvec_minmax
+	},
+	{
+		.procname	= "quic_rmem",
+		.data		= &sysctl_quic_rmem,
+		.maxlen		= sizeof(sysctl_quic_rmem),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+	{
+		.procname	= "quic_wmem",
+		.data		= &sysctl_quic_wmem,
+		.maxlen		= sizeof(sysctl_quic_wmem),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},
+#ifndef register_sysctl
+	{ /* sentinel */ }
+#endif
+};
 
 static void quic_sysctl_register(void)
 {
