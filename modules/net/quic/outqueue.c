@@ -601,15 +601,14 @@ void quic_outq_transmit_probe(struct sock *sk)
 void quic_outq_transmit_close(struct sock *sk, u8 type, u32 errcode, u8 level)
 {
 	struct quic_outqueue *outq = quic_outq(sk);
-	struct quic_connection_close close = {};
+	struct quic_connection_close c = {};
 
 	if (!errcode)
 		return;
 
-	close.errcode = errcode;
-	close.frame = type;
-	quic_inq_event_recv(sk, QUIC_EVENT_CONNECTION_CLOSE, &close,
-			    sizeof(close));
+	c.errcode = errcode;
+	c.frame = type;
+	quic_inq_event_recv(sk, QUIC_EVENT_CONNECTION_CLOSE, &c, sizeof(c));
 
 	outq->close_errcode = errcode;
 	outq->close_frame = type;

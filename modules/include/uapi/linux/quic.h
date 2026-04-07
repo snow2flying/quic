@@ -202,7 +202,8 @@ struct quic_connection_close {
 	__u32	errcode;
 	__u8	frame;
 	__u8	reserved[3];
-	__u8	phrase[];
+#define QUIC_CLOSE_PHRASE_BUFFER_SIZE 64
+	__u8	phrase[QUIC_CLOSE_PHRASE_BUFFER_SIZE];
 };
 
 union quic_event {

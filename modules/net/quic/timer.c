@@ -37,15 +37,15 @@ void quic_timer_sack_handler(struct sock *sk)
 {
 	struct quic_pnspace *space = quic_pnspace(sk, QUIC_CRYPTO_APP);
 	struct quic_inqueue *inq = quic_inq(sk);
-	struct quic_connection_close close = {};
+	struct quic_connection_close c = {};
 
 	if (quic_is_closed(sk))
 		return;
 
 	if (inq->sack_flag == QUIC_SACK_FLAG_NONE) {
 		/* Idle timer expired, close the connection. */
-		quic_inq_event_recv(sk, QUIC_EVENT_CONNECTION_CLOSE, &close,
-				    sizeof(close));
+		quic_inq_event_recv(sk, QUIC_EVENT_CONNECTION_CLOSE, &c,
+				    sizeof(c));
 		quic_set_state(sk, QUIC_SS_CLOSED);
 
 		pr_debug("%s: idle timeout\n", __func__);

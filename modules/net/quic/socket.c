@@ -1834,32 +1834,23 @@ static int quic_sock_set_connection_id(struct sock *sk, void *kopt, u32 len)
 	return 0;
 }
 
-static int quic_sock_set_connection_close(struct sock *sk,
-					  struct quic_connection_close *close,
-					  u32 len)
+static int quic_sock_set_connection_close(struct sock *sk, void *kopt, u32 len)
 {
 	struct quic_outqueue *outq = quic_outq(sk);
+	struct quic_connection_close c = {};
 	u8 *data = NULL;
 
-	if (len < sizeof(*close))
-		return -EINVAL;
+	quic_copy_common(&c, sizeof(c) - 1, kopt, len);
 
-	/* Remaining length is the length of the phrase (if any). */
-	len -= sizeof(*close);
-	if (len > QUIC_CLOSE_PHRASE_MAX_LEN + 1)
-		return -EINVAL;
-
-	if (len) {
-		if (close->phrase[len - 1]) /* Phrase must end with '\0'. */
-			return -EINVAL;
-		data = kmemdup(close->phrase, len, GFP_KERNEL);
+	if (strlen(c.phrase)) {
+		data = kmemdup(c.phrase, strlen(c.phrase) + 1, GFP_KERNEL);
 		if (!data)
 			return -ENOMEM;
 	}
 
 	kfree(outq->close_phrase);
 	outq->close_phrase = data;
-	outq->close_errcode = close->errcode;
+	outq->close_errcode = c.errcode;
 	return 0;
 }
 
@@ -2490,28 +2481,20 @@ static int quic_sock_get_connection_id(struct sock *sk, u32 len,
 static int quic_sock_get_connection_close(struct sock *sk, u32 len,
 					  sockptr_t optval, sockptr_t optlen)
 {
-	u8 *phrase, frame[QUIC_FRAME_BUF_LARGE] = {};
 	struct quic_outqueue *outq = quic_outq(sk);
-	struct quic_connection_close *close;
-	u32 phrase_len = 0;
+	struct quic_connection_close c = {};
 
-	phrase = outq->close_phrase;
-	if (phrase)
-		phrase_len = strlen(phrase) + 1;
-	/* Check if output buffer is large enough. */
-	if (len < sizeof(*close) + phrase_len)
-		return -EINVAL;
+	if (len > sizeof(c))
+		len = sizeof(c);
 
-	len = sizeof(*close) + phrase_len;
-	close = (void *)frame;
-	close->errcode = outq->close_errcode;
-	close->frame = outq->close_frame;
+	c.errcode = outq->close_errcode;
+	c.frame = outq->close_frame;
 
-	if (phrase_len)
-		strscpy(close->phrase, phrase, phrase_len);
+	if (outq->close_phrase)
+		strscpy(c.phrase, outq->close_phrase, sizeof(c.phrase));
 
 	if (copy_to_sockptr(optlen, &len, sizeof(len)) ||
-	    copy_to_sockptr(optval, close, len))
+	    copy_to_sockptr(optval, &c, len))
 		return -EFAULT;
 	return 0;
 }

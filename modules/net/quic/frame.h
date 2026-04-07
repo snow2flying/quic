@@ -8,8 +8,6 @@
  *    Xin Long <lucien.xin@gmail.com>
  */
 
-#define QUIC_CLOSE_PHRASE_MAX_LEN	80
-
 #define QUIC_TOKEN_MAX_LEN		120
 
 #define QUIC_TICKET_MIN_LEN		64

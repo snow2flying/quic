@@ -1090,7 +1090,7 @@ static int quic_packet_stateless_reset_process(struct sock *sk,
 					       struct sk_buff *skb)
 {
 	struct quic_conn_id_set *id_set = quic_dest(sk);
-	struct quic_connection_close close = {};
+	struct quic_connection_close c = {};
 	u8 *token;
 
 	if (skb->len < QUIC_STATELESS_RESET_MIN_LEN)
@@ -1122,9 +1122,8 @@ static int quic_packet_stateless_reset_process(struct sock *sk,
 	 * that ends in that stateless reset token, the peer will immediately
 	 * end the connection.
 	 */
-	close.errcode = QUIC_TRANSPORT_ERROR_CRYPTO;
-	quic_inq_event_recv(sk, QUIC_EVENT_CONNECTION_CLOSE, &close,
-			    sizeof(close));
+	c.errcode = QUIC_TRANSPORT_ERROR_CRYPTO;
+	quic_inq_event_recv(sk, QUIC_EVENT_CONNECTION_CLOSE, &c, sizeof(c));
 	quic_set_state(sk, QUIC_SS_CLOSED);
 	consume_skb(skb);
 	pr_debug("%s: peer reset\n", __func__);
@@ -2352,11 +2351,11 @@ static int quic_packet_number_check(struct sock *sk)
 	 * further packets.
 	 */
 	if (!quic_is_closed(sk)) {
-		struct quic_connection_close close = {};
+		struct quic_connection_close c = {};
 
 		/* Notify application that the connection is being closed. */
-		quic_inq_event_recv(sk, QUIC_EVENT_CONNECTION_CLOSE, &close,
-				    sizeof(close));
+		quic_inq_event_recv(sk, QUIC_EVENT_CONNECTION_CLOSE, &c,
+				    sizeof(c));
 		quic_set_state(sk, QUIC_SS_CLOSED);
 	}
 	return -EPIPE;
