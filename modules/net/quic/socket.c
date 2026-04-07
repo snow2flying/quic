@@ -1668,36 +1668,38 @@ static void quic_close(struct sock *sk, long timeout)
 	sk_common_release(sk);
 }
 
-static int quic_sock_set_event(struct sock *sk, struct quic_event_option *event,
-			       u32 len)
+static int quic_sock_set_event(struct sock *sk, void *kopt, u32 len)
 {
 	struct quic_inqueue *inq = quic_inq(sk);
+	struct quic_event_option e = {};
 
-	if (len != sizeof(*event))
-		return -EINVAL;
-	if (!event->type || event->type >= QUIC_EVENT_MAX)
+	quic_copy_common(&e, sizeof(e), kopt, len);
+
+	if (!e.type || e.type >= QUIC_EVENT_MAX)
 		return -EINVAL;
 
-	if (event->on) { /* Enable event by setting its bit. */
-		inq->events |= BIT(event->type);
+	if (e.on) { /* Enable event by setting its bit. */
+		inq->events |= BIT(e.type);
 		return 0;
 	}
-	inq->events &= ~BIT(event->type); /* Disable by clearing its bit. */
+	inq->events &= ~BIT(e.type); /* Disable by clearing its bit. */
 	return 0;
 }
 
-static int quic_sock_stream_reset(struct sock *sk, struct quic_errinfo *info,
-				  u32 len)
+static int quic_sock_stream_reset(struct sock *sk, void *kopt, u32 len)
 {
 	struct quic_stream_table *streams = quic_streams(sk);
 	struct quic_outqueue *outq = quic_outq(sk);
+	struct quic_errinfo info = {};
 	struct quic_stream *stream;
 	struct quic_frame *frame;
 
-	if (len != sizeof(*info) || !quic_is_established(sk))
+	if (!quic_is_established(sk))
 		return -EINVAL;
 
-	stream = quic_stream_get(streams, info->stream_id, 0, quic_is_serv(sk),
+	quic_copy_common(&info, sizeof(info), kopt, len);
+
+	stream = quic_stream_get(streams, info.stream_id, 0, quic_is_serv(sk),
 				 true);
 	if (IS_ERR(stream))
 		return PTR_ERR(stream);
@@ -1712,7 +1714,7 @@ static int quic_sock_stream_reset(struct sock *sk, struct quic_errinfo *info,
 	if (stream->send.state >= QUIC_STREAM_SEND_STATE_RECVD)
 		return -EINVAL;
 
-	frame = quic_frame_create(sk, QUIC_FRAME_RESET_STREAM, info);
+	frame = quic_frame_create(sk, QUIC_FRAME_RESET_STREAM, &info);
 	if (IS_ERR(frame))
 		return PTR_ERR(frame);
 
@@ -1723,17 +1725,19 @@ static int quic_sock_stream_reset(struct sock *sk, struct quic_errinfo *info,
 	return 0;
 }
 
-static int quic_sock_stream_stop_sending(struct sock *sk,
-					 struct quic_errinfo *info, u32 len)
+static int quic_sock_stream_stop_sending(struct sock *sk, void *kopt, u32 len)
 {
 	struct quic_stream_table *streams = quic_streams(sk);
 	struct quic_inqueue *inq = quic_inq(sk);
+	struct quic_errinfo info = {};
 	struct quic_stream *stream;
 
-	if (len != sizeof(*info) || !quic_is_established(sk))
+	if (!quic_is_established(sk))
 		return -EINVAL;
 
-	stream = quic_stream_get(streams, info->stream_id, 0, quic_is_serv(sk),
+	quic_copy_common(&info, sizeof(info), kopt, len);
+
+	stream = quic_stream_get(streams, info.stream_id, 0, quic_is_serv(sk),
 				 false);
 	if (IS_ERR(stream))
 		return PTR_ERR(stream);
@@ -1756,23 +1760,24 @@ static int quic_sock_stream_stop_sending(struct sock *sk,
 	quic_inq_list_purge(sk, &inq->stream_list, stream);
 	quic_inq_list_purge(sk, &inq->recv_list, stream);
 
-	return quic_outq_transmit_frame(sk, QUIC_FRAME_STOP_SENDING, info, 0,
+	return quic_outq_transmit_frame(sk, QUIC_FRAME_STOP_SENDING, &info, 0,
 					false);
 }
 
-static int quic_sock_set_connection_id(struct sock *sk,
-				       struct quic_connection_id_info *info,
-				       u32 len)
+static int quic_sock_set_connection_id(struct sock *sk, void *kopt, u32 len)
 {
 	struct quic_conn_id_set *id_set = quic_source(sk);
+	struct quic_connection_id_info info = {};
 	struct quic_conn_id *active, *old;
 	u64 number, first, last;
 	int err;
 
-	if (len < sizeof(*info) || !quic_is_established(sk))
+	if (!quic_is_established(sk))
 		return -EINVAL;
 
-	if (info->dest) {
+	quic_copy_common(&info, sizeof(info), kopt, len);
+
+	if (info.dest) {
 		id_set = quic_dest(sk);
 		/* The alternative connection ID is reserved for the migration
 		 * path.  Until the migration completes and this path becomes
@@ -1783,23 +1788,23 @@ static int quic_sock_set_connection_id(struct sock *sk,
 			return -EAGAIN;
 	}
 	old = quic_conn_id_active(id_set);
-	if (info->active) { /* Change active connection ID. */
+	if (info.active) { /* Change active connection ID. */
 		/* Ensure the new active ID is greater than the current one.
 		 * All lower-numbered IDs are implicitly treated as used.
 		 */
-		if (info->active <= quic_conn_id_number(old))
+		if (info.active <= quic_conn_id_number(old))
 			return -EINVAL;
-		active = quic_conn_id_find(id_set, info->active);
+		active = quic_conn_id_find(id_set, info.active);
 		if (!active)
 			return -EINVAL;
 		quic_conn_id_set_active(id_set, active);
 	}
 
-	if (!info->prior_to)
+	if (!info.prior_to)
 		return 0;
 
 	/* Retire connection IDs up to (but not including) 'prior_to'. */
-	number = info->prior_to;
+	number = info.prior_to;
 	last = quic_conn_id_last_number(id_set);
 	first = quic_conn_id_first_number(id_set);
 	if (number > last || number <= first ||
@@ -1809,7 +1814,7 @@ static int quic_sock_set_connection_id(struct sock *sk,
 		return -EINVAL;
 	}
 
-	if (!info->dest) {
+	if (!info.dest) {
 		/* Retire source conn IDs via NEW_CONNECTION_ID frames. */
 		err = quic_outq_transmit_new_conn_id(sk, number, 0, false);
 		if (err) {
@@ -2143,45 +2148,46 @@ static int quic_sock_set_transport_params_ext(struct sock *sk, u8 *p, u32 len)
 	return 0;
 }
 
-static int quic_sock_set_crypto_secret(struct sock *sk,
-				       struct quic_crypto_secret *secret,
-				       u32 len)
+static int quic_sock_set_crypto_secret(struct sock *sk, void *kopt, u32 len)
 {
 	struct quic_path_group *paths = quic_paths(sk);
 	struct quic_packet *packet = quic_packet(sk);
 	struct quic_outqueue *outq = quic_outq(sk);
 	struct quic_inqueue *inq = quic_inq(sk);
+	struct quic_crypto_secret s = {};
 	struct quic_crypto *crypto;
 	struct sk_buff_head tmpq;
 	struct sk_buff *skb;
 	union quic_addr *a;
 	int err;
 
-	if (!quic_is_establishing(sk) || len != sizeof(*secret))
+	if (!quic_is_establishing(sk))
 		return -EINVAL;
+
+	quic_copy_common(&s, sizeof(s), kopt, len);
 
 	/* Accept only supported levels: Handshake, 0-RTT (Early), or 1-RTT
 	 * (App).  The initial secret was already derived in-kernel using the
 	 * original destination connection ID.
 	 */
-	if (secret->level != QUIC_CRYPTO_APP &&
-	    secret->level != QUIC_CRYPTO_EARLY &&
-	    secret->level != QUIC_CRYPTO_HANDSHAKE)
+	if (s.level != QUIC_CRYPTO_APP &&
+	    s.level != QUIC_CRYPTO_EARLY &&
+	    s.level != QUIC_CRYPTO_HANDSHAKE)
 		return -EINVAL;
 
 	/* Install keys into the crypto context. */
-	crypto = quic_crypto(sk, secret->level);
-	err = quic_crypto_set_secret(crypto, secret, packet->version, 0);
+	crypto = quic_crypto(sk, s.level);
+	err = quic_crypto_set_secret(crypto, &s, packet->version, 0);
 	if (err)
 		return err;
 
-	if (secret->level != QUIC_CRYPTO_APP) {
-		if (secret->send) { /* 0-RTT or Handshake send key is ready. */
+	if (s.level != QUIC_CRYPTO_APP) {
+		if (s.send) { /* 0-RTT or Handshake send key is ready. */
 			/* If 0-RTT send key is ready, set data_level to EARLY.
 			 * This allows quic_outq_transmit_stream() to emit
 			 * stream frames in 0-RTT packets.
 			 */
-			if (secret->level == QUIC_CRYPTO_EARLY) {
+			if (s.level == QUIC_CRYPTO_EARLY) {
 				outq->data_level = QUIC_CRYPTO_EARLY;
 				quic_outq_transmit(sk);
 			}
@@ -2197,7 +2203,7 @@ static int quic_sock_set_crypto_secret(struct sock *sk,
 		return 0;
 	}
 
-	if (secret->send) {
+	if (s.send) {
 		/* App send key is ready, set data_level to APP. This allows
 		 * quic_outq_transmit_stream() to emit stream frames in 1-RTT
 		 * packets.
@@ -2393,21 +2399,21 @@ static int quic_sock_get_event(struct sock *sk, u32 len, sockptr_t optval,
 			       sockptr_t optlen)
 {
 	struct quic_inqueue *inq = quic_inq(sk);
-	struct quic_event_option event;
+	struct quic_event_option e = {};
 
-	if (len < sizeof(event))
-		return -EINVAL;
-	len = sizeof(event);
-	if (copy_from_sockptr(&event, optval, len))
+	if (len > sizeof(e))
+		len = sizeof(e);
+
+	if (copy_from_sockptr(&e, optval, len))
 		return -EFAULT;
 
-	if (!event.type || event.type >= QUIC_EVENT_MAX)
+	if (!e.type || e.type >= QUIC_EVENT_MAX)
 		return -EINVAL;
 	/* Set on if the corresponding event bit is set. */
-	event.on = !!(inq->events & BIT(event.type));
+	e.on = !!(inq->events & BIT(e.type));
 
 	if (copy_to_sockptr(optlen, &len, sizeof(len)) ||
-	    copy_to_sockptr(optval, &event, len))
+	    copy_to_sockptr(optval, &e, len))
 		return -EFAULT;
 	return 0;
 }
@@ -2416,12 +2422,12 @@ static int quic_sock_stream_open(struct sock *sk, u32 len, sockptr_t optval,
 				 sockptr_t optlen)
 {
 	struct quic_stream_table *streams = quic_streams(sk);
-	struct quic_stream_info sinfo;
+	struct quic_stream_info sinfo = {};
 	struct quic_stream *stream;
 
-	if (len < sizeof(sinfo))
-		return -EINVAL;
-	len = sizeof(sinfo);
+	if (len > sizeof(sinfo))
+		len = sizeof(sinfo);
+
 	if (copy_from_sockptr(&sinfo, optval, len))
 		return -EFAULT;
 
@@ -2452,13 +2458,16 @@ static int quic_sock_stream_open(struct sock *sk, u32 len, sockptr_t optval,
 static int quic_sock_get_connection_id(struct sock *sk, u32 len,
 				       sockptr_t optval, sockptr_t optlen)
 {
-	struct quic_connection_id_info info;
+	struct quic_connection_id_info info = {};
 	struct quic_conn_id_set *id_set;
 	struct quic_conn_id *active;
 
-	if (len < sizeof(info) || !quic_is_established(sk))
+	if (!quic_is_established(sk))
 		return -EINVAL;
-	len = sizeof(info);
+
+	if (len > sizeof(info))
+		len = sizeof(info);
+
 	if (copy_from_sockptr(&info, optval, len))
 		return -EFAULT;
 
@@ -2660,21 +2669,21 @@ static int quic_sock_get_transport_params_ext(struct sock *sk, u32 len,
 static int quic_sock_get_crypto_secret(struct sock *sk, u32 len,
 				       sockptr_t optval, sockptr_t optlen)
 {
-	struct quic_crypto_secret secret = {};
+	struct quic_crypto_secret s = {};
 
-	if (len < sizeof(secret))
-		return -EINVAL;
-	len = sizeof(secret);
-	if (copy_from_sockptr(&secret, optval, len))
+	if (len > sizeof(s))
+		len = sizeof(s);
+
+	if (copy_from_sockptr(&s, optval, len))
 		return -EFAULT;
 
-	if (secret.level >= QUIC_CRYPTO_MAX)
+	if (s.level >= QUIC_CRYPTO_MAX)
 		return -EINVAL;
-	if (quic_crypto_get_secret(quic_crypto(sk, secret.level), &secret))
+	if (quic_crypto_get_secret(quic_crypto(sk, s.level), &s))
 		return -EINVAL;
 
 	if (copy_to_sockptr(optlen, &len, sizeof(len)) ||
-	    copy_to_sockptr(optval, &secret, len))
+	    copy_to_sockptr(optval, &s, len))
 		return -EFAULT;
 	return 0;
 }
