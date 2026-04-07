@@ -677,59 +677,36 @@ static int do_client_notification_test(int sockfd)
 
 static int do_client_close_test(int sockfd)
 {
-	struct quic_connection_close *info;
+	struct quic_connection_close info = {}, *pinfo;
 	struct quic_event_option event;
 	unsigned int optlen, flags;
-	char opt[100] = {};
 	int64_t sid;
 	int ret;
 
 	printf("CLOSE TEST:\n");
 
-	info = (struct quic_connection_close *)opt;
-	info->errcode = 10;
-	info->frame = 1;
-	strcpy((char *)info->phrase, "this is app err");
-	ret = setsockopt(sockfd, SOL_QUIC, QUIC_SOCKOPT_CONNECTION_CLOSE,
-			 info, sizeof(*info) + strlen((char *)info->phrase));
-	if (ret != -1) {
-		printf("test1: FAIL\n");
-		return -1;
-	}
-	printf("test1: PASS (not allowed to set close info with non-string phrase)\n");
-
-	ret = setsockopt(sockfd, SOL_QUIC, QUIC_SOCKOPT_CONNECTION_CLOSE,
-			 info, sizeof(*info) - 1);
-	if (ret != -1) {
-		printf("test2: FAIL\n");
-		return -1;
-	}
-	printf("test2: PASS (not allowed to set close info with short info)\n");
-
-	optlen = sizeof(opt);
-	ret = getsockopt(sockfd, SOL_QUIC, QUIC_SOCKOPT_CONNECTION_CLOSE, opt, &optlen);
-	if (ret == -1 || optlen != sizeof(*info)) {
+	optlen = sizeof(info);
+	ret = getsockopt(sockfd, SOL_QUIC, QUIC_SOCKOPT_CONNECTION_CLOSE, &info, &optlen);
+	if (ret == -1 || optlen != sizeof(info)) {
 		printf("test3: FAIL ret %d, optlen %u\n", ret, optlen);
 		return -1;
 	}
 	printf("test3: PASS (get non-setup close info from socket)\n");
 
-	info = (struct quic_connection_close *)opt;
-	info->errcode = 10;
-	info->frame = 1;
-	strcpy((char *)info->phrase, "this is app err");
-	ret = setsockopt(sockfd, SOL_QUIC, QUIC_SOCKOPT_CONNECTION_CLOSE,
-			 info, sizeof(*info) + strlen((char *)info->phrase) + 1);
+	info.errcode = 10;
+	info.frame = 1;
+	strcpy((char *)info.phrase, "this is app err");
+	ret = setsockopt(sockfd, SOL_QUIC, QUIC_SOCKOPT_CONNECTION_CLOSE, &info, sizeof(info));
 	if (ret == -1) {
 		printf("socket setsockopt close info error %d\n", errno);
 		return -1;
 	}
-	optlen = sizeof(opt);
-	ret = getsockopt(sockfd, SOL_QUIC, QUIC_SOCKOPT_CONNECTION_CLOSE, opt, &optlen);
-	if (ret == -1 || info->errcode != 10 || info->frame != 0 ||
-	    strcmp((char *)info->phrase, "this is app err")) {
+	optlen = sizeof(info);
+	ret = getsockopt(sockfd, SOL_QUIC, QUIC_SOCKOPT_CONNECTION_CLOSE, &info, &optlen);
+	if (ret == -1 || info.errcode != 10 || info.frame != 0 ||
+	    strcmp((char *)info.phrase, "this is app err")) {
 		printf("test4: FAIL ret %d, errcode %u, frame %d, phrase %s\n",
-		       ret, info->errcode, info->frame, info->phrase);
+		       ret, info.errcode, info.frame, info.phrase);
 		return -1;
 	}
 	printf("test4: PASS (set and get close info from socket)\n");
@@ -773,11 +750,11 @@ static int do_client_close_test(int sockfd)
 		printf("test7: FAIL flags %u, event %d\n", flags, msg[0]);
 		return -1;
 	}
-	info = (struct quic_connection_close *)&msg[1];
-	if (info->errcode != 10 || info->frame != 0 ||
-	    strcmp((char *)info->phrase, "this is app err")) {
+	pinfo = (struct quic_connection_close *)&msg[1];
+	if (pinfo->errcode != 10 || pinfo->frame != 0 ||
+	    strcmp((char *)pinfo->phrase, "this is app err")) {
 		printf("test7: FAIL errcode %u, frame %d, phrase %s\n",
-		       info->errcode, info->frame, info->phrase);
+		       pinfo->errcode, pinfo->frame, pinfo->phrase);
 		return -1;
 	}
 	printf("test7: PASS (received the peer close event)\n");
@@ -2155,16 +2132,14 @@ static int do_server_test(int sockfd)
 		}
 
 		if (!strcmp(msg, "client close")) {
-			struct quic_connection_close *info;
-			char opt[100] = {};
+			struct quic_connection_close info = {};
 
-			info = (struct quic_connection_close *)opt;
-			info->errcode = 10;
-			info->frame = 1;
-			strcpy((char *)info->phrase, "this is app err");
+			info.errcode = 10;
+			info.frame = 1;
+			strcpy((char *)info.phrase, "this is app err");
 
 			ret = setsockopt(sockfd, SOL_QUIC, QUIC_SOCKOPT_CONNECTION_CLOSE,
-					 info, sizeof(*info) + strlen((char *)info->phrase) + 1);
+					 &info, sizeof(info));
 			if (ret == -1) {
 				printf("socket setsockopt close info error %d\n", errno);
 				return -1;
