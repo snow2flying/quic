@@ -433,46 +433,47 @@ static bool quic_v4_cmp_sk_addr(struct sock *sk, union quic_addr *a,
 		return false;
 	if (a->v4.sin_family != addr->v4.sin_family)
 		return false;
-	if (a->v4.sin_addr.s_addr == htonl(INADDR_ANY) ||
-	    addr->v4.sin_addr.s_addr == htonl(INADDR_ANY))
+	/* Fail if socket has ANY but addr is specific. */
+	if (addr->v4.sin_addr.s_addr == htonl(INADDR_ANY))
+		return a->v4.sin_addr.s_addr == htonl(INADDR_ANY);
+	if (a->v4.sin_addr.s_addr == htonl(INADDR_ANY))
 		return true;
 	return a->v4.sin_addr.s_addr == addr->v4.sin_addr.s_addr;
 }
 
-static bool quic_v4_match_v6_addr(union quic_addr *a4, union quic_addr *a6)
+static bool quic_v4_match_v6_addr(union quic_addr *a4, union quic_addr *a6,
+				  bool a6_from_sk)
 {
 	if (ipv6_addr_any(&a6->v6.sin6_addr))
-		return true;
+		return a6_from_sk;
 	if (!ipv6_addr_v4mapped(&a6->v6.sin6_addr))
 		return false;
 	if (a4->v4.sin_addr.s_addr == htonl(INADDR_ANY))
-		return true;
+		return !a6_from_sk;
 	return a6->v6.sin6_addr.s6_addr32[3] == a4->v4.sin_addr.s_addr;
 }
 
 static bool quic_v6_cmp_sk_addr(struct sock *sk, union quic_addr *a,
 				union quic_addr *addr)
 {
+	if (a->sa.sa_family == AF_INET && addr->sa.sa_family == AF_INET)
+		return quic_v4_cmp_sk_addr(sk, a, addr);
+
 	if (a->v4.sin_port != addr->v4.sin_port)
 		return false;
-
-	if (a->sa.sa_family == AF_INET && addr->sa.sa_family == AF_INET) {
-		if (a->v4.sin_addr.s_addr == htonl(INADDR_ANY) ||
-		    addr->v4.sin_addr.s_addr == htonl(INADDR_ANY))
-			return true;
-		return a->v4.sin_addr.s_addr == addr->v4.sin_addr.s_addr;
-	}
 
 	if (a->sa.sa_family != addr->sa.sa_family) {
 		if (ipv6_only_sock(sk))
 			return false;
 		if (a->sa.sa_family == AF_INET)
-			return quic_v4_match_v6_addr(a, addr);
-		return quic_v4_match_v6_addr(addr, a);
+			return quic_v4_match_v6_addr(a, addr, false);
+		return quic_v4_match_v6_addr(addr, a, true);
 	}
 
-	if (ipv6_addr_any(&a->v6.sin6_addr) ||
-	    ipv6_addr_any(&addr->v6.sin6_addr))
+	/* Fail if socket has ANY but addr is specific. */
+	if (ipv6_addr_any(&addr->v6.sin6_addr))
+		return ipv6_addr_any(&a->v6.sin6_addr);
+	if (ipv6_addr_any(&a->v6.sin6_addr))
 		return true;
 	if (!ipv6_addr_equal(&a->v6.sin6_addr, &addr->v6.sin6_addr))
 		return false;
