@@ -602,14 +602,16 @@ static struct ctl_table quic_table[] = {
 		.data		= &sysctl_quic_rmem,
 		.maxlen		= sizeof(sysctl_quic_rmem),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= SYSCTL_ONE,
 	},
 	{
 		.procname	= "quic_wmem",
 		.data		= &sysctl_quic_wmem,
 		.maxlen		= sizeof(sysctl_quic_wmem),
 		.mode		= 0644,
-		.proc_handler	= proc_dointvec,
+		.proc_handler	= proc_dointvec_minmax,
+		.extra1		= SYSCTL_ONE,
 	},
 #ifndef register_sysctl
 	{ /* sentinel */ }
