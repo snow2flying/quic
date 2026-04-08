@@ -1529,7 +1529,7 @@ static int quic_packet_handshake_process(struct sock *sk, struct sk_buff *skb)
 		 * count. These ECN counts are included in subsequent ACK
 		 * frames.
 		 */
-		quic_pnspace_inc_ecn_count(space, quic_get_msg_ecn(skb));
+		quic_pnspace_inc_ecn_local(space, quic_get_msg_ecn(skb));
 
 		if (packet->has_sack) {
 			/* rfc9002#section-6:
@@ -1741,7 +1741,7 @@ static int quic_packet_app_process_done(struct sock *sk, struct sk_buff *skb)
 	 * increases the corresponding ECT(0), ECT(1), or ECN-CE count. These
 	 * ECN counts are included in subsequent ACK frames.
 	 */
-	quic_pnspace_inc_ecn_count(space, quic_get_msg_ecn(skb));
+	quic_pnspace_inc_ecn_local(space, quic_get_msg_ecn(skb));
 
 	/* Only process migration on the latest PN seen. */
 	if (cb->number == space->max_pn_seen)

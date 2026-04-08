@@ -29,6 +29,7 @@ enum {
 enum {
 	QUIC_ECN_LOCAL, /* ECN bits from incoming IP headers */
 	QUIC_ECN_PEER,  /* ECN bits reported by peer in ACK frames */
+	QUIC_ECN_ACKED, /* ECN bits from packets newly ACKed */
 	QUIC_ECN_DIR_MAX
 };
 
@@ -110,7 +111,22 @@ static inline bool quic_pnspace_has_gap(const struct quic_pnspace *space)
 	return space->base_pn != space->max_pn_seen + 1;
 }
 
-static inline void quic_pnspace_inc_ecn_count(struct quic_pnspace *space,
+static inline void quic_pnspace_inc_ecn_acked(struct quic_pnspace *space,
+					      u8 ecn)
+{
+	if (!ecn)
+		return;
+	space->ecn_count[QUIC_ECN_ACKED][ecn - 1]++;
+}
+
+static inline void quic_pnspace_reset_ecn_acked(struct quic_pnspace *space)
+{
+	space->ecn_count[QUIC_ECN_ACKED][QUIC_ECN_ECT0] = 0;
+	space->ecn_count[QUIC_ECN_ACKED][QUIC_ECN_ECT1] = 0;
+	space->ecn_count[QUIC_ECN_ACKED][QUIC_ECN_CE] = 0;
+}
+
+static inline void quic_pnspace_inc_ecn_local(struct quic_pnspace *space,
 					      u8 ecn)
 {
 	if (!ecn)
@@ -119,11 +135,48 @@ static inline void quic_pnspace_inc_ecn_count(struct quic_pnspace *space,
 }
 
 /* Check if any ECN-marked packets were received. */
-static inline bool quic_pnspace_has_ecn_count(struct quic_pnspace *space)
+static inline bool quic_pnspace_has_ecn_local(struct quic_pnspace *space)
 {
 	return space->ecn_count[QUIC_ECN_LOCAL][QUIC_ECN_ECT0] ||
 	       space->ecn_count[QUIC_ECN_LOCAL][QUIC_ECN_ECT1] ||
 	       space->ecn_count[QUIC_ECN_LOCAL][QUIC_ECN_CE];
+}
+
+/* Validate ECN counts received in an ACK. */
+static inline bool quic_pnspace_validate_ecn(struct quic_pnspace *space,
+					     u64 *ecn_count, s64 pn)
+{
+	u64 *acked = space->ecn_count[QUIC_ECN_ACKED];
+	u64 *peer = space->ecn_count[QUIC_ECN_PEER];
+	u64 ect0, ect1, ce;
+
+	/* rfc9000#section-13.4.2.1:
+	 *
+	 * Validating ECN counts from reordered ACK frames can result in
+	 * failure. An endpoint MUST NOT fail ECN validation as a result of
+	 * processing an ACK frame that does not increase the largest
+	 * acknowledged packet number.
+	 */
+	if (pn != space->max_pn_seen)
+		return true;
+
+	if (peer[QUIC_ECN_ECT0] > ecn_count[QUIC_ECN_ECT0] ||
+	    peer[QUIC_ECN_ECT1] > ecn_count[QUIC_ECN_ECT1] ||
+	    peer[QUIC_ECN_CE] > ecn_count[QUIC_ECN_CE])
+		return false;
+
+	/* rfc9000#section-13.4.2.1:
+	 *
+	 * ECN validation also fails if the sum of the increase in ECT(0) and
+	 * ECN-CE counts is less than the number of newly acknowledged packets
+	 * that were originally sent with an ECT(0) marking (Same for ECT(1)).
+	 */
+	ect0 = ecn_count[QUIC_ECN_ECT0] - peer[QUIC_ECN_ECT0];
+	ect1 = ecn_count[QUIC_ECN_ECT1] - peer[QUIC_ECN_ECT1];
+	ce = ecn_count[QUIC_ECN_CE] - peer[QUIC_ECN_CE];
+
+	return ect0 + ce >= acked[QUIC_ECN_ECT0] &&
+	       ect1 + ce >= acked[QUIC_ECN_ECT1];
 }
 
 /* Updates the stored ECN counters based on values received in the peer's ACK
@@ -132,8 +185,8 @@ static inline bool quic_pnspace_has_ecn_count(struct quic_pnspace *space)
  * Returns: true if CE count was increased (congestion indicated), false
  * otherwise.
  */
-static inline bool quic_pnspace_set_ecn_count(struct quic_pnspace *space,
-					      u64 *ecn_count)
+static inline bool quic_pnspace_set_ecn_peer(struct quic_pnspace *space,
+					     u64 *ecn_count)
 {
 	u64 *count = space->ecn_count[QUIC_ECN_PEER];
 

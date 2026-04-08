@@ -748,8 +748,10 @@ void quic_outq_transmitted_sack(struct sock *sk, u8 level, s64 largest,
 		 * codepoint are eventually deemed lost, indicating that ECN
 		 * validation has failed.
 		 */
-		if (sent->ecn)
+		if (sent->ecn) {
 			quic_set_sk_ecn(sk, INET_ECN_ECT_0);
+			quic_pnspace_inc_ecn_acked(space, sent->ecn);
+		}
 
 		outq->inflight -= sent->frame_len;
 		space->inflight -= sent->frame_len;

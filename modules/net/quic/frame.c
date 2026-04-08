@@ -59,7 +59,7 @@ quic_frame_ack_create(struct sock *sk, void *data, u8 type)
 
 	space = quic_pnspace(sk, level);
 	/* If ECN counts are present, use ACK_ECN frame type. */
-	type += quic_pnspace_has_ecn_count(space);
+	type += quic_pnspace_has_ecn_local(space);
 	/* Collect gap-based ACK blocks from the PN space. */
 	num_gabs = quic_pnspace_num_gabs(space, gabs);
 
@@ -1108,6 +1108,7 @@ static int quic_frame_ack_process(struct sock *sk, struct quic_frame *frame,
 				  u8 type)
 {
 	u64 largest, smallest, range, delay, count, gap, i;
+	struct quic_skb_cb *cb = QUIC_SKB_CB(frame->skb);
 	u8 *p = frame->data, level = frame->level;
 	struct quic_inqueue *inq = quic_inq(sk);
 	struct quic_cong *cong = quic_cong(sk);
@@ -1132,6 +1133,7 @@ static int quic_frame_ack_process(struct sock *sk, struct quic_frame *frame,
 		frame->errcode = QUIC_TRANSPORT_ERROR_PROTOCOL_VIOLATION;
 		return -EINVAL;
 	}
+	quic_pnspace_reset_ecn_acked(space);
 
 	/* rfc9000#section-19.3.1: smallest = largest - ack_range. */
 	smallest = largest - range;
@@ -1157,20 +1159,23 @@ static int quic_frame_ack_process(struct sock *sk, struct quic_frame *frame,
 					   (s64)smallest, -1, 0);
 	}
 
-	if (type == QUIC_FRAME_ACK_ECN) {
-		if (!quic_get_var(&p, &len, &ecn_count[QUIC_ECN_ECT0]) ||
-		    !quic_get_var(&p, &len, &ecn_count[QUIC_ECN_ECT1]) ||
-		    !quic_get_var(&p, &len, &ecn_count[QUIC_ECN_CE]))
-			return -EINVAL;
-		/* If the ECN-CE counter reported by the peer has increased,
-		 * this could be a new congestion event.
-		 */
-		if (quic_pnspace_set_ecn_count(space, ecn_count)) {
-			quic_cong_on_process_ecn(cong);
-			quic_outq_sync_window(sk, cong->window);
-		}
-	}
+	if (type != QUIC_FRAME_ACK_ECN)
+		goto out;
 
+	if (!quic_get_var(&p, &len, &ecn_count[QUIC_ECN_ECT0]) ||
+	    !quic_get_var(&p, &len, &ecn_count[QUIC_ECN_ECT1]) ||
+	    !quic_get_var(&p, &len, &ecn_count[QUIC_ECN_CE]))
+		return -EINVAL;
+
+	if (!quic_pnspace_validate_ecn(space, ecn_count, cb->number)) {
+		quic_set_sk_ecn(sk, 0);
+		goto out;
+	}
+	if (quic_pnspace_set_ecn_peer(space, ecn_count)) {
+		quic_cong_on_process_ecn(cong);
+		quic_outq_sync_window(sk, cong->window);
+	}
+out:
 	return (int)(frame->len - len);
 }
 
