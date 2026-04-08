@@ -369,6 +369,7 @@ static void quic_v4_get_pref_addr(struct sock *sk, union quic_addr *addr,
 static void quic_v6_get_pref_addr(struct sock *sk, union quic_addr *addr,
 				  u8 **pp, u32 *plen)
 {
+	struct dst_entry *dst;
 	u8 *p = *pp;
 	int type;
 
@@ -389,6 +390,11 @@ static void quic_v6_get_pref_addr(struct sock *sk, union quic_addr *addr,
 			goto out;
 		/* Fallback to IPv4 if IPv6 address is not usable. */
 		return quic_v4_get_pref_addr(sk, addr, pp, plen);
+	}
+	if (type & IPV6_ADDR_LINKLOCAL) {
+		dst = __sk_dst_get(sk);
+		if (dst)
+			addr->v6.sin6_scope_id = dst->dev->ifindex;
 	}
 out:
 	*plen -= (p - *pp);
