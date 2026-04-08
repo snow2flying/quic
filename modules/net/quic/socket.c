@@ -245,9 +245,13 @@ struct sock *quic_listen_sock_lookup(struct sk_buff *skb, union quic_addr *sa,
 			    quic_cmp_sk_addr(tmp, a, sa) &&
 			    quic_path_usock(quic_paths(tmp), 0) == skb->sk &&
 			    (!alpns->data || !quic_alpn(tmp)->len)) {
-				sk = tmp;
-				if (!quic_is_any_addr(a))
+				if (!quic_is_any_addr(a)) {
+					sk = tmp;
 					break; /* Prefer specific addr match. */
+				}
+				/* Prefer ipv4 ANY over ipv6 ANY for v4 addr. */
+				if (!sk || a->sa.sa_family == sa->sa.sa_family)
+					sk = tmp;
 			}
 		}
 		/* No need to check get_nulls_value(node) != hash for !sk, as
@@ -267,9 +271,12 @@ struct sock *quic_listen_sock_lookup(struct sk_buff *skb, union quic_addr *sa,
 			    quic_cmp_sk_addr(tmp, a, sa) &&
 			    quic_path_usock(quic_paths(tmp), 0) == skb->sk &&
 			    quic_data_has(quic_alpn(tmp), &alpn)) {
-				sk = tmp;
-				if (!quic_is_any_addr(a))
+				if (!quic_is_any_addr(a)) {
+					sk = tmp;
 					break;
+				}
+				if (!sk || a->sa.sa_family == sa->sa.sa_family)
+					sk = tmp;
 			}
 		}
 		/* No need to check get_nulls_value(node) != hash for !sk, as
@@ -580,7 +587,7 @@ free:
 
 static int quic_hash(struct sock *sk)
 {
-	struct quic_path_group *paths = quic_paths(sk);
+	struct quic_path_group *npaths, *paths = quic_paths(sk);
 	struct quic_data *alpns = quic_alpn(sk);
 	struct net *net = sock_net(sk);
 	struct hlist_nulls_node *node;
@@ -615,10 +622,10 @@ static int quic_hash(struct sock *sk)
 	sk_nulls_for_each(nsk, node, &head->head) {
 		if (net != sock_net(nsk))
 			continue;
-		if (!quic_cmp_sk_addr(nsk, quic_path_saddr(paths, 0), sa))
+		npaths = quic_paths(nsk);
+		if (memcmp(quic_path_saddr(npaths, 0), sa, sizeof(*sa)))
 			continue;
-		if (quic_path_usock(paths, 0) !=
-		    quic_path_usock(quic_paths(nsk), 0))
+		if (quic_path_usock(paths, 0) != quic_path_usock(npaths, 0))
 			continue;
 
 		/* Take the ALPNs into account, which allows directing the
