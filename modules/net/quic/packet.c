@@ -2604,6 +2604,7 @@ static int quic_packet_bundle(struct sock *sk, struct sk_buff *skb)
 		goto init;
 	}
 	/* Bundle it and update metadata for the aggregate skb. */
+	skb_orphan(skb);
 	p = packet->head;
 	head_cb = QUIC_SKB_CB(p);
 	if (head_cb->last == p)
