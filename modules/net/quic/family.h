@@ -31,8 +31,8 @@ void quic_get_msg_addrs(struct sk_buff *skb, union quic_addr *da,
 int quic_get_mtu_info(struct sk_buff *skb, u32 *info);
 u8 quic_get_msg_ecn(struct sk_buff *skb);
 
-int quic_get_addr_from_user(struct sock *sk, union quic_addr *a,
-			    struct sockaddr *addr, int addr_len);
+int quic_get_user_addr(struct sock *sk, union quic_addr *a,
+		       struct sockaddr *addr, int addr_len, bool any);
 void quic_get_pref_addr(struct sock *sk, union quic_addr *addr, u8 **pp,
 			u32 *plen);
 void quic_set_pref_addr(struct sock *sk, u8 *p, union quic_addr *addr);
