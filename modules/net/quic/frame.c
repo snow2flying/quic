@@ -1550,6 +1550,7 @@ static int quic_frame_stop_sending_process(struct sock *sk,
 	update.id = (s64)stream_id;
 	update.state = QUIC_STREAM_SEND_STATE_RESET_SENT;
 	update.errcode = errcode;
+	update.finalsz = stream->send.bytes;
 	quic_inq_event_recv(sk, QUIC_EVENT_STREAM_UPDATE, &update,
 			    sizeof(update));
 
@@ -2117,6 +2118,7 @@ static void quic_frame_reset_stream_ack(struct sock *sk,
 	update.id = stream->id;
 	update.state = QUIC_STREAM_SEND_STATE_RESET_RECVD;
 	update.errcode = stream->send.errcode;
+	update.finalsz = stream->send.bytes;
 	quic_inq_event_recv(sk, QUIC_EVENT_STREAM_UPDATE, &update,
 			    sizeof(update));
 
