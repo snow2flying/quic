@@ -191,15 +191,20 @@ static int recv_event(int sockfd, char *msg, size_t len, int type)
 	return 0;
 }
 
-static int recv_event_stream_update(int sockfd, int state)
+static int recv_event_stream_update(int sockfd, int64_t id, int state,
+				    uint32_t errcode, uint64_t finalsz)
 {
 	union quic_event *ev;
 
 	if (recv_event(sockfd, msg, sizeof(msg), QUIC_EVENT_STREAM_UPDATE))
 		return -1;
 	ev = (union quic_event *)&msg[1];
-	if (ev->update.state != state) {
-		printf("%s: state=%u\n", __func__, ev->update.state);
+	if (ev->update.id != id || ev->update.state != state ||
+	    ev->update.errcode != errcode || ev->update.finalsz != finalsz) {
+		printf("%s: id=%d-%d state=%u-%u errcode=%u-%u finalsz=%d-%d\n",
+		       __func__, (int)ev->update.id, (int)id, ev->update.state,
+		       state, ev->update.errcode, errcode,
+		       (int)ev->update.finalsz, (int)finalsz);
 		return -1;
 	}
 	return 0;
@@ -1619,7 +1624,8 @@ static int test_notification(int connectfd, int acceptfd)
 	flags = 0;
 	if (send_pass(connectfd, msg, sizeof(msg), sid, flags))
 		return -1;
-	if (recv_event_stream_update(acceptfd, QUIC_STREAM_RECV_STATE_RECV))
+	if (recv_event_stream_update(acceptfd, sid, QUIC_STREAM_RECV_STATE_RECV,
+				     0, 0))
 		return -1;
 	printf("[] Stream RECV_STATE_RECV\n");
 
@@ -1627,11 +1633,14 @@ static int test_notification(int connectfd, int acceptfd)
 	flags = MSG_QUIC_STREAM_FIN;
 	if (send_pass(connectfd, NULL, 0, sid, flags))
 		return -1;
-	if (recv_event_stream_update(connectfd, QUIC_STREAM_SEND_STATE_RECVD))
+	if (recv_event_stream_update(connectfd, sid,
+				     QUIC_STREAM_SEND_STATE_RECVD, 0, 0))
 		return -1;
 	printf("[] Stream SEND_STATE_RECVD\n");
 
-	if (recv_event_stream_update(acceptfd, QUIC_STREAM_RECV_STATE_RECVD))
+	if (recv_event_stream_update(acceptfd, sid,
+				     QUIC_STREAM_RECV_STATE_RECVD, 0,
+				     sizeof(msg)))
 		return -1;
 	flags = 0;
 	if (recv_pass(acceptfd, msg, sizeof(msg), &sid, &flags))
@@ -1650,7 +1659,8 @@ static int test_notification(int connectfd, int acceptfd)
 	flags = 0;
 	if (send_pass(connectfd, msg, sizeof(msg), sid, flags))
 		return -1;
-	if (recv_event_stream_update(acceptfd, QUIC_STREAM_RECV_STATE_RECV))
+	if (recv_event_stream_update(acceptfd, sid, QUIC_STREAM_RECV_STATE_RECV,
+				     0, 0))
 		return -1;
 	optlen = sizeof(errinfo);
 	errinfo.stream_id = info.stream_id;
@@ -1658,14 +1668,16 @@ static int test_notification(int connectfd, int acceptfd)
 	if (setopt_pass(connectfd, QUIC_SOCKOPT_STREAM_RESET, &errinfo,
 			optlen))
 		return -1;
-	if (recv_event_stream_update(acceptfd,
-				     QUIC_STREAM_RECV_STATE_RESET_RECVD))
+	if (recv_event_stream_update(acceptfd, sid,
+				     QUIC_STREAM_RECV_STATE_RESET_RECVD, 1,
+				     sizeof(msg)))
 		return -1;
 	printf("[] Stream RECV_STATE_RESET_RECVD\n");
 
 	flags = 0;
-	if (recv_event_stream_update(connectfd,
-				     QUIC_STREAM_SEND_STATE_RESET_RECVD))
+	if (recv_event_stream_update(connectfd, sid,
+				     QUIC_STREAM_SEND_STATE_RESET_RECVD, 1,
+				     sizeof(msg)))
 		return -1;
 	printf("[] Stream SEND_STATE_RESET_RECVD\n");
 
