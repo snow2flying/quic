@@ -104,18 +104,22 @@ struct quic_frame_frag {
 struct quic_frame {
 	union {
 		struct quic_frame_frag *flist; /* TX: list of data fragments */
-		struct sk_buff *skb; /* RX: skb with raw frame data */
+		struct sk_buff *skb;           /* RX: skb with raw frame data */
 	};
 	struct quic_stream *stream; /* Stream related to this frame */
 	struct list_head list;      /* List node for queuing frames */
 	union {
-		s64 offset; /* RX: stream/crypto or read data offset */
-		s64 number; /* TX: first packet number used */
+		s64 stream_id; /* READ: cached stream ID; stream freed on FIN */
+		s64 offset;    /* RX: stream/crypto receive offset */
+		s64 number;    /* TX: first packet number used */
 	};
 	u8  *data; /* Pointer to the actual frame data buffer */
 
 	refcount_t refcnt;
-	u16 errcode; /* Error code set during frame processing */
+	union {
+		u16 read_offset; /* READ: offset already read in frame data */
+		u16 errcode;     /* RX: error code set in frame processing */
+	};
 	u8  level;   /* Packet number space: Initial, Handshake, or App */
 	u8  type;    /* Frame type identifier */
 	u16 bytes;   /* Number of user data bytes */

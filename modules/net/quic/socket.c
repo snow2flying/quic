@@ -1258,17 +1258,17 @@ static int quic_recvmsg(struct sock *sk, struct msghdr *msg, size_t msg_len,
 #endif
 {
 	u32 copy, copied = 0, freed = 0, bytes = 0;
-	struct quic_inqueue *inq = quic_inq(sk);
 	struct quic_handshake_info hinfo = {};
 	struct quic_stream_info sinfo = {};
 	struct quic_stream *stream = NULL;
 	struct quic_frame *frame, *next;
 	struct list_head *head;
+	s64 stream_id = -1;
 	int err, fin;
 
 	lock_sock(sk);
 
-	head = &inq->recv_list;
+	head = &quic_inq(sk)->recv_list;
 
 	err = quic_wait_for_packet(sk, head, flags);
 	if (err)
@@ -1280,10 +1280,11 @@ static int quic_recvmsg(struct sock *sk, struct msghdr *msg, size_t msg_len,
 		 * remaining data in the frame and the remaining user buffer
 		 * space.
 		 */
-		copy = min_t(u32, frame->len - frame->offset, msg_len - copied);
+		copy = min_t(u32, frame->len - frame->read_offset,
+			     msg_len - copied);
 		if (copy) { /* Copy data from frame to user message iterator. */
-			copy = copy_to_iter(frame->data + frame->offset, copy,
-					    &msg->msg_iter);
+			copy = copy_to_iter(frame->data + frame->read_offset,
+					    copy, &msg->msg_iter);
 			if (!copy) {
 				if (!copied) {
 					/* Return err only if nothing copied. */
@@ -1296,6 +1297,7 @@ static int quic_recvmsg(struct sock *sk, struct msghdr *msg, size_t msg_len,
 		}
 		fin = frame->stream_fin;
 		stream = frame->stream;
+		stream_id = frame->stream_id;
 		if (frame->event) { /* An Event received. */
 			msg->msg_flags |= MSG_QUIC_NOTIFICATION;
 		} else if (frame->level) {
@@ -1312,9 +1314,9 @@ static int quic_recvmsg(struct sock *sk, struct msghdr *msg, size_t msg_len,
 		}
 		if (flags & MSG_PEEK)
 			break; /* Peek: look at first frame, do not consume. */
-		if (copy != frame->len - frame->offset) {
-			/* Partial copy: update offset and exit loop. */
-			frame->offset += copy;
+		if (copy != frame->len - frame->read_offset) {
+			/* Partial copy: update read_offset and exit loop. */
+			frame->read_offset += copy;
 			break;
 		}
 		msg->msg_flags |= MSG_EOR;
@@ -1329,14 +1331,7 @@ static int quic_recvmsg(struct sock *sk, struct msghdr *msg, size_t msg_len,
 		freed += frame->len;
 		list_del(&frame->list);
 		quic_frame_put(frame);
-		if (fin) { /* fin implies a valid stream pointer. */
-			/* rfc9000#section-3.2:
-			 *
-			 * Once stream data has been delivered, the stream
-			 * enters the "Data Read" state, which is a terminal
-			 * state.
-			 */
-			stream->recv.state = QUIC_STREAM_RECV_STATE_READ;
+		if (fin) {
 			sinfo.stream_flags |= MSG_QUIC_STREAM_FIN;
 			break;
 		}
@@ -1346,14 +1341,14 @@ static int quic_recvmsg(struct sock *sk, struct msghdr *msg, size_t msg_len,
 		 */
 		if (list_entry_is_head(next, head, list) || copied >= msg_len)
 			break;
-		if (next->event || next->dgram || !next->stream ||
-		    next->stream != stream)
+		if (next->event || next->dgram || next->stream_id == -1 ||
+		    next->stream_id != stream_id)
 			break;
 	};
 
-	if (stream) {
+	if (stream_id != -1) {
 		/* Attach stream info if stream data was processed. */
-		sinfo.stream_id = stream->id;
+		sinfo.stream_id = stream_id;
 		put_cmsg(msg, SOL_QUIC, QUIC_STREAM_INFO, sizeof(sinfo),
 			 &sinfo);
 		if (msg->msg_flags & MSG_CTRUNC)
@@ -1361,13 +1356,6 @@ static int quic_recvmsg(struct sock *sk, struct msghdr *msg, size_t msg_len,
 
 		/* Update flow control accounting for freed bytes. */
 		quic_inq_flow_control(sk, stream, freed);
-
-		/* If stream read completed, purge and release resources. */
-		if (stream->recv.state == QUIC_STREAM_RECV_STATE_READ) {
-			quic_inq_list_purge(sk, &inq->stream_list, stream);
-			quic_stream_put(quic_streams(sk), stream,
-					quic_is_serv(sk), false);
-		}
 	}
 
 	quic_inq_data_read(sk, bytes); /* Release receive memory accounting. */

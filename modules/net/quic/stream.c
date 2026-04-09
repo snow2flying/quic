@@ -263,70 +263,45 @@ struct quic_stream *quic_stream_get(struct quic_stream_table *streams,
 
 /* Release or clean up a send or recv stream. This function updates stream
  * counters and state when a send stream has either successfully sent all data
- * or has been reset, or when a recv stream has either consumed all data or has
+ * or has been reset, or when a recv stream has either received all data or has
  * been reset. Requires sock lock held.
  */
 void quic_stream_put(struct quic_stream_table *streams,
 		     struct quic_stream *stream, bool is_serv, bool send)
 {
 	if (quic_stream_id_uni(stream->id)) {
+		/* For uni streams, decrement uni count and delete stream. */
 		if (send) {
-			/* For uni streams, decrement uni count and delete
-			 * immediately.
-			 */
 			streams->send.streams_uni--;
 			quic_stream_delete(stream);
 			return;
 		}
-		/* For uni streams, decrement uni count and mark done. */
-		if (!stream->recv.done) {
-			stream->recv.done = 1;
-			streams->recv.streams_uni--;
-			streams->recv.uni_pending = 1;
-		}
-		/* Delete stream if fully read or reset. */
-		if (stream->recv.state > QUIC_STREAM_RECV_STATE_RECVD)
-			quic_stream_delete(stream);
+		streams->recv.streams_uni--;
+		streams->recv.uni_pending = 1;
+		quic_stream_delete(stream);
 		return;
 	}
 
+	/* For bidi streams, proceed only if both send and receive in a final
+	 * state.
+	 */
 	if (send) {
-		/* For bidi streams, only proceed if receive side is in a final
-		 * state.
-		 */
 		if (stream->recv.state < QUIC_STREAM_RECV_STATE_RECVD)
 			return;
 	} else {
-		/* For bidi streams, only proceed if send side is in a final
-		 * state.
-		 */
 		if (stream->send.state != QUIC_STREAM_SEND_STATE_RECVD &&
 		    stream->send.state != QUIC_STREAM_SEND_STATE_RESET_RECVD)
 			return;
 	}
-
 	if (quic_stream_id_local(stream->id, is_serv)) {
-		/* Local-initiated stream: mark send done and decrement
-		 * send.bidi count.
-		 */
-		if (!stream->send.done) {
-			stream->send.done = 1;
-			streams->send.streams_bidi--;
-		}
+		/* Local-initiated stream: decrement send.bidi count. */
+		streams->send.streams_bidi--;
 	} else {
-		/* Remote-initiated stream: mark recv done and decrement recv
-		 * bidi count.
-		 */
-		if (!stream->recv.done) {
-			stream->recv.done = 1;
-			streams->recv.streams_bidi--;
-			streams->recv.bidi_pending = 1;
-		}
+		/* Remote-initiated stream: decrement recv.bidi count. */
+		streams->recv.streams_bidi--;
+		streams->recv.bidi_pending = 1;
 	}
-
-	/* Delete stream if fully read or reset. */
-	if (stream->recv.state > QUIC_STREAM_RECV_STATE_RECVD)
-		quic_stream_delete(stream);
+	quic_stream_delete(stream);
 }
 
 /* Updates the maximum allowed incoming stream IDs if any streams were recently

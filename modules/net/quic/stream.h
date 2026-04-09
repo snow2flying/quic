@@ -45,7 +45,6 @@ struct quic_stream {
 		u8 state;    /* Send stream state, per rfc9000#section-3.1 */
 
 		u8 data_blocked; /* True if flow control blocks sending */
-		u8 done;         /* True if FIN has been sent */
 	} send;
 	struct {
 		/* Receiving-side stream level flow control */
@@ -61,7 +60,6 @@ struct quic_stream {
 		u8 state;  /* Receive stream state, per rfc9000#section-3.2 */
 
 		u8 stop_sent; /* True if STOP_SENDING has been sent */
-		u8 done;      /* True if all data has been received or read */
 	} recv;
 };
 

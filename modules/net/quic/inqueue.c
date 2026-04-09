@@ -55,9 +55,7 @@ void quic_inq_flow_control(struct sock *sk, struct quic_stream *stream,
 		return;
 
 	mss = quic_packet_mss(packet);
-	/* Account for bytes read at both stream and connection levels. */
-	stream->recv.bytes += bytes;
-	inq->bytes += bytes;
+	inq->bytes += bytes; /* Account for bytes read at connection. */
 
 	 /* Check and update connection-level flow control. */
 	window = inq->max_data;
@@ -73,6 +71,11 @@ void quic_inq_flow_control(struct sock *sk, struct quic_stream *stream,
 			frame = 1;
 	}
 
+	if (!stream)
+		goto out;
+
+	stream->recv.bytes += bytes; /* Account for bytes read at stream. */
+
 	/* Check and update stream-level flow control. */
 	window = stream->recv.window;
 	if (stream->recv.state < QUIC_STREAM_RECV_STATE_RECVD &&
@@ -86,18 +89,23 @@ void quic_inq_flow_control(struct sock *sk, struct quic_stream *stream,
 			frame = 1;
 	}
 
+out:
 	if (frame) {
 		space->need_sack = 1; /* Bundle an ACK frame with it. */
 		quic_outq_transmit(sk);
 	}
 }
 
-/* Handle in-order stream frame delivery. */
-static void quic_inq_stream_tail(struct sock *sk, struct quic_stream *stream,
+/* Deliver stream frame in order. Returns true when all stream data has been
+ * delivered.
+ */
+static bool quic_inq_stream_tail(struct sock *sk, struct quic_stream *stream,
 				 struct quic_frame *frame)
 {
 	struct quic_inqueue *inq = quic_inq(sk);
 	struct quic_stream_update update = {};
+	bool fin = frame->stream_fin;
+	struct list_head *head;
 	u64 overlap;
 
 	/* Calculate overlap between stream's current recv offset and frame
@@ -113,42 +121,43 @@ static void quic_inq_stream_tail(struct sock *sk, struct quic_stream *stream,
 	}
 	stream->recv.offset += frame->len; /* Advance stream receive offset. */
 
-	if (frame->stream_fin) {
-		/* Notify that the stream has been fully received. */
-		update.id = stream->id;
-		update.state = QUIC_STREAM_RECV_STATE_RECVD;
-		update.finalsz = frame->offset + frame->len;
-		quic_inq_event_recv(sk, QUIC_EVENT_STREAM_UPDATE, &update,
-				    sizeof(update));
-
-		/* rfc9000#section-3.2:
-		 *
-		 * Once all data for the stream has been received, the
-		 * receiving part enters the "Data Recvd" state.
-		 */
-		stream->recv.state = update.state;
-		/* Release stream and update limits to allow opening new
-		 * streams.
-		 */
-		quic_stream_put(quic_streams(sk), stream, quic_is_serv(sk),
-				false);
-	}
-
-	frame->offset = 0; /* Reset for reusing it as recvmsg() read offset. */
-	if (frame->level && !quic_crypto(sk, QUIC_CRYPTO_APP)->recv_ready) {
-		/* Stream frame was received at encryption level 0-RTT (early
-		 * data).  Queue it into early_list. After the handshake
-		 * completes and 1-RTT keys are installed, these frames will be
-		 * moved to recv_list for delivery to the application.
-		 */
-		frame->level = 0;
-		list_add_tail(&frame->list, &inq->early_list);
-		return;
-	}
-	/* Frame is ready for application delivery: queue in recv_list. */
+	/* Queue frame for app delivery: early 0-RTT frames go to early_list,
+	 * moved to recv_list after handshake.
+	 */
+	head = &inq->recv_list;
+	if (frame->level && !quic_crypto(sk, QUIC_CRYPTO_APP)->recv_ready)
+		head = &inq->early_list;
 	frame->level = 0;
-	list_add_tail(&frame->list, &inq->recv_list);
+	frame->stream_id = stream->id; /* Reuse frame->offset field. */
+	list_add_tail(&frame->list, head);
+	if (!fin)
+		goto out;
+
+	/* Notify that the stream has been fully received. */
+	update.id = stream->id;
+	update.state = QUIC_STREAM_RECV_STATE_RECVD;
+	update.finalsz = stream->recv.offset;
+	quic_inq_event_recv(sk, QUIC_EVENT_STREAM_UPDATE, &update,
+			    sizeof(update));
+	/* rfc9000#section-3.2:
+	 *
+	 * Once all data for the stream has been received, the receiving part
+	 * enters the "Data Recvd" state.
+	 */
+	stream->recv.state = update.state;
+
+	/* Detach stream from recv_list frames and purge from stream_list. */
+	list_for_each_entry(frame, head, list) {
+		if (frame->stream_id == stream->id)
+			frame->stream = NULL;
+	}
+	quic_inq_list_purge(sk, &inq->stream_list, stream);
+	/* Release stream and update limits for new streams. */
+	quic_stream_put(quic_streams(sk), stream, quic_is_serv(sk), false);
+
+out:
 	sk->sk_data_ready(sk); /* Notify socket that data is available. */
+	return fin;
 }
 
 /* Check and optionally charge receive memory for a QUIC socket.
@@ -300,8 +309,7 @@ int quic_inq_stream_recv(struct sock *sk, struct quic_frame *frame)
 	/* In-order: directly handled and queued. */
 	inq->highest += highest;
 	stream->recv.highest += highest;
-	quic_inq_stream_tail(sk, stream, frame);
-	if (!stream->recv.frags)
+	if (quic_inq_stream_tail(sk, stream, frame) || !stream->recv.frags)
 		return 0;
 
 	/* Check the buffered frames list and merge any frames contiguous with
@@ -317,16 +325,14 @@ int quic_inq_stream_recv(struct sock *sk, struct quic_frame *frame)
 		list_del(&frame->list);
 		stream->recv.frags--;
 		if (stream->recv.offset >= frame->offset + frame->len &&
-		    (stream->recv.state == QUIC_STREAM_RECV_STATE_RECVD ||
-		     !frame->stream_fin)) {
-			/* Duplicate frame. Do not discard if it has FIN and no
-			 * FIN seen yet.
-			 */
+		    !frame->stream_fin) {
+			/* Duplicate frame. Do not discard if it has FIN. */
 			quic_inq_rfree((int)frame->len, sk);
 			quic_frame_put(frame);
 			continue;
 		}
-		quic_inq_stream_tail(sk, stream, frame);
+		if (quic_inq_stream_tail(sk, stream, frame))
+			break;
 	}
 	return 0;
 }
@@ -389,7 +395,7 @@ static void quic_inq_handshake_tail(struct sock *sk, struct quic_frame *frame)
 			}
 		}
 
-		frame->offset = 0;
+		frame->offset = -1; /* Reset for stream ID reuse. */
 		list_add_tail(&frame->list, head);
 		sk->sk_data_ready(sk);
 		return;
@@ -591,7 +597,6 @@ int quic_inq_event_recv(struct sock *sk, u8 event, void *data, u32 len)
 	p = quic_put_data(frame->data, &event, 1);
 	quic_put_data(p, data, len);
 	frame->event = 1; /* Mark this frame as an event. */
-	frame->offset = 0;
 
 	/* Insert event frame ahead of stream or dgram data. */
 	list_for_each_entry(pos, head, list) {
@@ -617,7 +622,6 @@ int quic_inq_dgram_recv(struct sock *sk, struct quic_frame *frame)
 
 	quic_inq_set_owner_r((int)frame->len, sk);
 	frame->dgram = 1; /* Mark frame as datagram for delivery. */
-	frame->offset = 0;
 	list_add_tail(&frame->list, &quic_inq(sk)->recv_list);
 	sk->sk_data_ready(sk);
 	return 0;
