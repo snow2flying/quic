@@ -144,21 +144,11 @@ static inline bool quic_pnspace_has_ecn_local(struct quic_pnspace *space)
 
 /* Validate ECN counts received in an ACK. */
 static inline bool quic_pnspace_validate_ecn(struct quic_pnspace *space,
-					     u64 *ecn_count, s64 pn)
+					     u64 *ecn_count)
 {
 	u64 *acked = space->ecn_count[QUIC_ECN_ACKED];
 	u64 *peer = space->ecn_count[QUIC_ECN_PEER];
 	u64 ect0, ect1, ce;
-
-	/* rfc9000#section-13.4.2.1:
-	 *
-	 * Validating ECN counts from reordered ACK frames can result in
-	 * failure. An endpoint MUST NOT fail ECN validation as a result of
-	 * processing an ACK frame that does not increase the largest
-	 * acknowledged packet number.
-	 */
-	if (pn != space->max_pn_seen)
-		return true;
 
 	if (peer[QUIC_ECN_ECT0] > ecn_count[QUIC_ECN_ECT0] ||
 	    peer[QUIC_ECN_ECT1] > ecn_count[QUIC_ECN_ECT1] ||

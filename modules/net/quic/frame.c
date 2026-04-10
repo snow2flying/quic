@@ -1108,13 +1108,13 @@ static int quic_frame_ack_process(struct sock *sk, struct quic_frame *frame,
 				  u8 type)
 {
 	u64 largest, smallest, range, delay, count, gap, i;
-	struct quic_skb_cb *cb = QUIC_SKB_CB(frame->skb);
 	u8 *p = frame->data, level = frame->level;
 	struct quic_inqueue *inq = quic_inq(sk);
 	struct quic_cong *cong = quic_cong(sk);
 	u64 ecn_count[QUIC_ECN_MAX];
 	struct quic_pnspace *space;
 	u32 len = frame->len;
+	s64 max_pn_acked;
 
 	if (!quic_get_var(&p, &len, &largest) ||
 	    !quic_get_var(&p, &len, &delay) ||
@@ -1133,6 +1133,7 @@ static int quic_frame_ack_process(struct sock *sk, struct quic_frame *frame,
 		frame->errcode = QUIC_TRANSPORT_ERROR_PROTOCOL_VIOLATION;
 		return -EINVAL;
 	}
+	max_pn_acked = space->max_pn_acked_seen;
 	quic_pnspace_reset_ecn_acked(space);
 
 	/* rfc9000#section-19.3.1: smallest = largest - ack_range. */
@@ -1167,7 +1168,15 @@ static int quic_frame_ack_process(struct sock *sk, struct quic_frame *frame,
 	    !quic_get_var(&p, &len, &ecn_count[QUIC_ECN_CE]))
 		return -EINVAL;
 
-	if (!quic_pnspace_validate_ecn(space, ecn_count, cb->number)) {
+	/* rfc9000#section-13.4.2.1:
+	 *
+	 * Validating ECN counts from reordered ACK frames can result in
+	 * failure. An endpoint MUST NOT fail ECN validation as a result of
+	 * processing an ACK frame that does not increase the largest
+	 * acknowledged packet number.
+	 */
+	if (space->max_pn_acked_seen > max_pn_acked &&
+	    !quic_pnspace_validate_ecn(space, ecn_count)) {
 		quic_set_sk_ecn(sk, 0);
 		goto out;
 	}
