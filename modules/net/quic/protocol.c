@@ -675,11 +675,10 @@ static __init int quic_init(void)
 	if (err)
 		goto err_hash;
 
-	/* Allocate an unbound reclaimable workqueue for UDP socket destruction
-	 * and backlog packet processing.
+	/* Allocate an unbound workqueue for UDP socket destruction and backlog
+	 * packet processing.
 	 */
-	quic_wq = alloc_workqueue("quic_workqueue",
-				  WQ_MEM_RECLAIM | WQ_UNBOUND, 0);
+	quic_wq = alloc_workqueue("quic_workqueue", WQ_UNBOUND, 0);
 	if (!quic_wq) {
 		err = -ENOMEM;
 		goto err_wq;
