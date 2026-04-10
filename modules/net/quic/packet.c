@@ -212,6 +212,9 @@ void quic_packet_rcv_err_pmtu(struct sock *sk)
 	struct dst_entry *dst;
 	bool reset_timer;
 
+	if (quic_is_closed(sk))
+		return;
+
 	info = clamp(paths->mtu_info, QUIC_PATH_MIN_PMTU, QUIC_PATH_MAX_PMTU);
 	/* If PLPMTUD is not enabled, update MSS using route and ICMP info. */
 	if (!paths->plpmtud_interval) {
