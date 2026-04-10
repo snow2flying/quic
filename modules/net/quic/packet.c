@@ -2019,6 +2019,7 @@ void quic_packet_backlog_work(struct work_struct *work)
 		quic_packet_process(sk, skb);
 		release_sock(sk);
 		sock_put(sk);
+		cond_resched();
 	}
 }
 
