@@ -269,6 +269,9 @@ static bool quic_cong_check_persistent_congestion(struct quic_cong *cong,
 {
 	u32 ssthresh;
 
+	if (!time)
+		return false;
+
 	/* rfc9002#section-7.6.1:
 	 *   (smoothed_rtt + max(4*rttvar, kGranularity) + max_ack_delay) *
 	 *      kPersistentCongestionThreshold
@@ -277,7 +280,7 @@ static bool quic_cong_check_persistent_congestion(struct quic_cong *cong,
 		   max(4 * cong->rttvar, QUIC_KGRANULARITY);
 	ssthresh = (ssthresh + cong->max_ack_delay) *
 		   QUIC_KPERSISTENT_CONGESTION_THRESHOLD;
-	if (cong->time - time <= ssthresh)
+	if (time <= ssthresh)
 		return false;
 
 	pr_debug("%s: persistent congestion, cwnd: %u, ssth: %u\n",
