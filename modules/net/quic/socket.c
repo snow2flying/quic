@@ -1479,6 +1479,9 @@ static int quic_accept_sock_init(struct sock *nsk, struct sock *sk)
 	struct quic_config config = {};
 	int err;
 
+	if (sk->sk_family == AF_INET6) /* Set IPv6 state if applicable. */
+		inet_sk(nsk)->pinet6 = &((struct quic6_sock *)nsk)->inet6;
+
 	err = quic_init_sock(nsk);
 	if (err)
 		return err;
@@ -1501,9 +1504,6 @@ static int quic_accept_sock_init(struct sock *nsk, struct sock *sk)
 	nsk->sk_bound_dev_if = sk->sk_bound_dev_if;
 
 	inet_sk(nsk)->pmtudisc = inet_sk(sk)->pmtudisc;
-
-	if (sk->sk_family == AF_INET6) /* Set IPv6 state if applicable. */
-		inet_sk(nsk)->pinet6 = &((struct quic6_sock *)nsk)->inet6;
 
 	quic_inq(nsk)->events = quic_inq(sk)->events;
 
