@@ -2121,7 +2121,7 @@ static void quic_frame_reset_stream_ack(struct sock *sk,
 {
 	struct quic_stream_table *streams = quic_streams(sk);
 	struct quic_stream *stream = frame->stream;
-	struct quic_stream_update update;
+	struct quic_stream_update update = {};
 
 	/* Notify that stream has been reset. */
 	update.id = stream->id;
@@ -2164,7 +2164,7 @@ static void quic_frame_stream_ack(struct sock *sk, struct quic_frame *frame)
 {
 	struct quic_stream_table *streams = quic_streams(sk);
 	struct quic_stream *stream = frame->stream;
-	struct quic_stream_update update;
+	struct quic_stream_update update = {};
 
 	stream->send.frags--;
 	if (stream->send.frags ||
