@@ -1085,7 +1085,7 @@ void quic_outq_retransmit_mark(struct sock *sk, u8 level, bool immediate)
 		} else { /* Measure time span between candidate loss points. */
 			duration = sent->sent_time - pc_start;
 			/* Any acked packet in between breaks the condition. */
-			if (!sent->next_acked)
+			if (sent->next_acked)
 				pc_start = 0;
 		}
 
