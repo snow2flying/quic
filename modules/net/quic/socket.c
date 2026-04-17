@@ -707,7 +707,11 @@ out:
 static inline void quic_copy_common(void *dst, size_t dlen, const void *src,
 				    size_t slen)
 {
-	memcpy(dst, src, min_t(size_t, dlen, slen));
+	size_t len = min_t(size_t, dlen, slen);
+
+	if (!len)
+		return;
+	memcpy(dst, src, len);
 }
 
 #define QUIC_MSG_STREAM_FLAGS \
