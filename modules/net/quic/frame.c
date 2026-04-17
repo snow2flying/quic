@@ -2990,7 +2990,7 @@ int quic_frame_parse_transport_params_ext(struct sock *sk,
 			if (!quic_get_param(&value, &p, &len))
 				return -EINVAL;
 			value = quic_msec_to_usec(value);
-			if (value < QUIC_MIN_IDLE_TIMEOUT)
+			if (value && value < QUIC_MIN_IDLE_TIMEOUT)
 				return -EINVAL;
 			params->max_idle_timeout = value;
 			break;
