@@ -1309,10 +1309,6 @@ static int quic_recvmsg(struct sock *sk, struct msghdr *msg, size_t msg_len,
 			hinfo.crypto_level = frame->level;
 			put_cmsg(msg, SOL_QUIC, QUIC_HANDSHAKE_INFO,
 				 sizeof(hinfo), &hinfo);
-			if (msg->msg_flags & MSG_CTRUNC) {
-				err = -EINVAL;
-				goto out;
-			}
 		} else if (frame->dgram) { /* A Datagram Message received. */
 			msg->msg_flags |= MSG_QUIC_DATAGRAM;
 		}
