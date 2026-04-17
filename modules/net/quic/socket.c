@@ -1774,9 +1774,8 @@ static int quic_sock_set_connection_id(struct sock *sk, void *kopt, u32 len)
 {
 	struct quic_conn_id_set *id_set = quic_source(sk);
 	struct quic_connection_id_info info = {};
-	struct quic_conn_id *active, *old;
+	struct quic_conn_id *active;
 	u64 number, first, last;
-	int err;
 
 	if (!quic_is_established(sk))
 		return -EINVAL;
@@ -1793,12 +1792,23 @@ static int quic_sock_set_connection_id(struct sock *sk, void *kopt, u32 len)
 		if (id_set->alt)
 			return -EAGAIN;
 	}
-	old = quic_conn_id_active(id_set);
+
+	if (info.prior_to) {
+		/* Retire connection IDs up to (but not including) prior_to. */
+		number = info.prior_to;
+		last = quic_conn_id_last_number(id_set);
+		first = quic_conn_id_first_number(id_set);
+		if (number > last || number <= first ||
+		    number + id_set->max_count > U32_MAX)
+			return -EINVAL;
+	}
+
+	active = quic_conn_id_active(id_set);
 	if (info.active) { /* Change active connection ID. */
 		/* Ensure the new active ID is greater than the current one.
 		 * All lower-numbered IDs are implicitly treated as used.
 		 */
-		if (info.active <= quic_conn_id_number(old))
+		if (info.active <= quic_conn_id_number(active))
 			return -EINVAL;
 		active = quic_conn_id_find(id_set, info.active);
 		if (!active)
@@ -1809,35 +1819,12 @@ static int quic_sock_set_connection_id(struct sock *sk, void *kopt, u32 len)
 	if (!info.prior_to)
 		return 0;
 
-	/* Retire connection IDs up to (but not including) 'prior_to'. */
-	number = info.prior_to;
-	last = quic_conn_id_last_number(id_set);
-	first = quic_conn_id_first_number(id_set);
-	if (number > last || number <= first ||
-	    number + id_set->max_count > U32_MAX) {
-		/* Invalid retirement range: revert any active ID change. */
-		quic_conn_id_set_active(id_set, old);
-		return -EINVAL;
-	}
-
-	if (!info.dest) {
-		/* Retire source conn IDs via NEW_CONNECTION_ID frames. */
-		err = quic_outq_transmit_new_conn_id(sk, number, 0, false);
-		if (err) {
-			quic_conn_id_set_active(id_set, old);
-			return err;
-		}
-		return 0;
-	}
+	/* Retire source conn IDs via NEW_CONNECTION_ID frames. */
+	if (!info.dest)
+		return quic_outq_transmit_new_conn_id(sk, number, 0, false);
 
 	/* Retire destination conn IDs via RETIRE_CONNECTION_ID frames. */
-	err = quic_outq_transmit_retire_conn_id(sk, number, 0, false);
-	if (err) {
-		quic_conn_id_set_active(id_set, old);
-		return err;
-	}
-
-	return 0;
+	return quic_outq_transmit_retire_conn_id(sk, number, 0, false);
 }
 
 static int quic_sock_set_connection_close(struct sock *sk, void *kopt, u32 len)
