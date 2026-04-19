@@ -661,7 +661,6 @@ void quic_inq_free(struct sock *sk)
 {
 	struct quic_inqueue *inq = quic_inq(sk);
 
-	__skb_queue_purge(&sk->sk_receive_queue);
 	__skb_queue_purge(&inq->backlog_list);
 	quic_inq_list_purge(sk, &inq->handshake_list, NULL);
 	quic_inq_list_purge(sk, &inq->stream_list, NULL);
