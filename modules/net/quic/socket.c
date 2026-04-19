@@ -1122,6 +1122,10 @@ static int quic_sendmsg(struct sock *sk, struct msghdr *msg, size_t msg_len)
 			goto err;
 		}
 		len = iov_iter_count(&msg->msg_iter);
+		if (len > sk->sk_sndbuf) {
+			err = -EMSGSIZE;
+			goto err;
+		}
 		if (sk_stream_wspace(sk) < len || !sk_wmem_schedule(sk, len)) {
 			err = quic_wait_for_send(sk, flags, len);
 			if (err)
