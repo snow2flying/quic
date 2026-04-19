@@ -1754,9 +1754,6 @@ static int quic_frame_connection_close_process(struct sock *sk,
 	if (type == QUIC_FRAME_CONNECTION_CLOSE &&
 	    !quic_get_var(&p, &len, &ftype))
 		return -EINVAL;
-	if (type == QUIC_FRAME_CONNECTION_CLOSE_APP &&
-	    frame->level != QUIC_CRYPTO_APP)
-		return -EINVAL;
 
 	if (!quic_get_var(&p, &len, &phrase_len) || phrase_len > len)
 		return -EINVAL;

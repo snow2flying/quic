@@ -180,7 +180,8 @@ static inline bool quic_frame_level_valid(u8 level, u8 type)
 		if (type == QUIC_FRAME_ACK || type == QUIC_FRAME_ACK_ECN ||
 		    type == QUIC_FRAME_CRYPTO || type == QUIC_FRAME_NEW_TOKEN ||
 		    type == QUIC_FRAME_HANDSHAKE_DONE ||
-		    type == QUIC_FRAME_PATH_RESPONSE)
+		    type == QUIC_FRAME_PATH_RESPONSE ||
+		    type == QUIC_FRAME_RETIRE_CONNECTION_ID)
 			return false;
 		return true;
 	}
