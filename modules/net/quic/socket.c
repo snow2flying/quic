@@ -1157,6 +1157,12 @@ static int quic_sendmsg(struct sock *sk, struct msghdr *msg, size_t msg_len)
 	msginfo.flags = sinfo.stream_flags;
 	flags |= sinfo.stream_flags;
 
+	if (!iov_iter_count(msginfo.msg)) { /* Allow stream FIN without data. */
+		if (!(flags & MSG_QUIC_STREAM_FIN))
+			return -EINVAL;
+		len = 0;
+	}
+
 	do {
 		if (!quic_sock_stream_writable(sk, stream, flags, len)) {
 			if (delay) {
