@@ -30,7 +30,7 @@ static char msg[512];
 
 #define QUIC_MSG_STREAM_FLAGS \
 	(MSG_QUIC_STREAM_NEW | MSG_QUIC_STREAM_FIN | MSG_QUIC_STREAM_UNI | \
-	 MSG_QUIC_STREAM_DONTWAIT)
+	 MSG_QUIC_STREAM_DONTWAIT | MSG_QUIC_STREAM_SNDBLOCK)
 
 static ssize_t send_msg(int sockfd, const void *msg, size_t len, int64_t sid,
 			uint32_t flags)
