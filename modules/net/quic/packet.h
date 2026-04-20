@@ -18,10 +18,8 @@ struct quic_packet {
 	struct sk_buff *head;        /* Head skb for packet bundling on send */
 	u16 frame_len; /* Length of all ack-eliciting frames excluding PING */
 	u16 overhead;  /* QUIC header length excluding frames */
-	u8 taglen[2];  /* Tag length for short and long packets */
-	u8 errframe;   /* Frame type causing packet processing failure */
-	u16 errcode;   /* Error code on packet processing failure */
 	u32 version;   /* QUIC version used/selected during handshake */
+	u8 taglen[2];  /* Tag length for short and long packets */
 	u16 frames;    /* Number of ack-eliciting frames excluding PING */
 	u16 mss[2];    /* MSS for datagram and non-datagram packets */
 	u16 hlen;      /* UDP + IP header length for sending */
@@ -115,8 +113,6 @@ static inline bool quic_packet_empty(struct quic_packet *packet)
 static inline void quic_packet_reset(struct quic_packet *packet)
 {
 	packet->level = 0;
-	packet->errcode = 0;
-	packet->errframe = 0;
 	packet->has_sack = 0;
 	packet->non_probing = 0;
 	packet->ack_requested = 0;

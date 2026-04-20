@@ -52,12 +52,14 @@ struct quic_skb_cb {
 	};
 	s64 number;  /* Parsed packet number, or the largest previously seen */
 	u32 seqno;   /* Dest connection ID number on RX */
-	u16 errcode; /* Error code if encryption/decryption fails */
 	u16 length;  /* Payload length + packet number length */
 
 	u16 number_offset; /* Offset of packet number field */
 	u8 number_len;     /* Length of the packet number field */
 	u8 level; /* Encryption level: Initial, Handshake, App, or Early */
+
+	u16 errcode;     /* Error code on packet processing failure */
+	u8 errframe;     /* Frame type causing packet processing failure */
 
 	u8 key_update:1; /* Key update triggered by this packet */
 	u8 key_phase:1;  /* Key phase used (0 or 1) */

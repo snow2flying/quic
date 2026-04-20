@@ -1361,8 +1361,7 @@ static int quic_packet_handshake_header_process(struct sock *sk,
 			 * MUST either discard the packet or generate a
 			 * connection error of type PROTOCOL_VIOLATION.
 			 */
-			packet->errcode =
-				QUIC_TRANSPORT_ERROR_PROTOCOL_VIOLATION;
+			cb->errcode = QUIC_TRANSPORT_ERROR_PROTOCOL_VIOLATION;
 			return -EINVAL;
 		}
 		break;
@@ -1471,7 +1470,6 @@ static int quic_packet_handshake_process(struct sock *sk, struct sk_buff *skb)
 				return err;
 			}
 			QUIC_INC_STATS(net, QUIC_MIB_PKT_DECDROP);
-			packet->errcode = cb->errcode;
 			goto err;
 		}
 		if (!cb->resume) /* Already decrypted (parse_alpn or async). */
@@ -1485,8 +1483,7 @@ static int quic_packet_handshake_process(struct sock *sk, struct sk_buff *skb)
 			 * of type PROTOCOL_VIOLATION.
 			 */
 			QUIC_INC_STATS(net, QUIC_MIB_PKT_INVHDRDROP);
-			packet->errcode =
-				QUIC_TRANSPORT_ERROR_PROTOCOL_VIOLATION;
+			cb->errcode = QUIC_TRANSPORT_ERROR_PROTOCOL_VIOLATION;
 			err = -EINVAL;
 			goto err;
 		}
@@ -1618,8 +1615,7 @@ next:
 		 */
 		uh = udp_hdr(skb);
 		if (ntohs(uh->len) - sizeof(*uh) < QUIC_MIN_UDP_PAYLOAD) {
-			packet->errcode =
-				QUIC_TRANSPORT_ERROR_PROTOCOL_VIOLATION;
+			cb->errcode = QUIC_TRANSPORT_ERROR_PROTOCOL_VIOLATION;
 			err = -EINVAL;
 			goto err;
 		}
@@ -1649,8 +1645,7 @@ err:
 	pr_debug("%s: failed, num: %llu, level: %d, err: %d\n",
 		 __func__, cb->number, packet->level, err);
 	/* Transmit a CLOSE frame packet if errcode is set. */
-	quic_outq_transmit_close(sk, frame.type, packet->errcode,
-				 packet->level);
+	quic_outq_transmit_close(sk, cb->errframe, cb->errcode, packet->level);
 	kfree_skb(skb);
 	return err;
 }
@@ -1898,8 +1893,6 @@ static int quic_packet_app_process(struct sock *sk, struct sk_buff *skb)
 			return err;
 		}
 		QUIC_INC_STATS(net, QUIC_MIB_PKT_DECDROP);
-		/* Not from key update: propagate error to close connection. */
-		packet->errcode = cb->errcode;
 		goto err;
 	}
 	if (cb->key_update) {
@@ -1919,7 +1912,7 @@ static int quic_packet_app_process(struct sock *sk, struct sk_buff *skb)
 		 * PROTOCOL_VIOLATION.
 		 */
 		QUIC_INC_STATS(net, QUIC_MIB_PKT_INVHDRDROP);
-		packet->errcode = QUIC_TRANSPORT_ERROR_PROTOCOL_VIOLATION;
+		cb->errcode = QUIC_TRANSPORT_ERROR_PROTOCOL_VIOLATION;
 		goto err;
 	}
 
@@ -1972,7 +1965,7 @@ err:
 	pr_debug("%s: failed, num: %llu, len: %d, err: %d\n",
 		 __func__, cb->number, skb->len, err);
 	/* Transmit a CLOSE frame packet if errcode is set. */
-	quic_outq_transmit_close(sk, packet->errframe, packet->errcode, 0);
+	quic_outq_transmit_close(sk, cb->errframe, cb->errcode, 0);
 	kfree_skb(skb);
 	return err;
 }

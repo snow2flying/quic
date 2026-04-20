@@ -2352,6 +2352,7 @@ void quic_frame_ack(struct sock *sk, struct quic_frame *frame)
 
 int quic_frame_process(struct sock *sk, struct quic_frame *frame)
 {
+	struct quic_skb_cb *cb = QUIC_SKB_CB(frame->skb);
 	struct quic_packet *packet = quic_packet(sk);
 	u8 type, level = frame->level;
 	int ret;
@@ -2362,7 +2363,7 @@ int quic_frame_process(struct sock *sk, struct quic_frame *frame)
 		 * An endpoint MUST treat receipt of a packet containing no
 		 * frames as a connection error of type PROTOCOL_VIOLATION.
 		 */
-		packet->errcode = QUIC_TRANSPORT_ERROR_PROTOCOL_VIOLATION;
+		cb->errcode = QUIC_TRANSPORT_ERROR_PROTOCOL_VIOLATION;
 		return -EINVAL;
 	}
 
@@ -2379,7 +2380,7 @@ int quic_frame_process(struct sock *sk, struct quic_frame *frame)
 			 * unknown type as a connection error of type
 			 * FRAME_ENCODING_ERROR.
 			 */
-			packet->errcode = QUIC_TRANSPORT_ERROR_FRAME_ENCODING;
+			cb->errcode = QUIC_TRANSPORT_ERROR_FRAME_ENCODING;
 			return -EPROTONOSUPPORT;
 		} else if (!quic_frame_level_valid(level, type)) {
 			pr_debug("%s: invalid frame, type: %x, level: %d\n",
@@ -2390,8 +2391,8 @@ int quic_frame_process(struct sock *sk, struct quic_frame *frame)
 		if (ret < 0) {
 			pr_debug("%s: failed, type: %x, level: %d, err: %d\n",
 				 __func__, type, level, ret);
-			packet->errframe = type;
-			packet->errcode = frame->errcode;
+			cb->errframe = type;
+			cb->errcode = frame->errcode;
 			return ret;
 		}
 		pr_debug("%s: done, type: %x, level: %d\n", __func__, type,
