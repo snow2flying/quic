@@ -63,6 +63,7 @@ struct quic_outqueue {
 	u8 validate_peer_address:1;
 	/* Disable Nagle-like coalescing for STREAM data */
 	u8 stream_data_nodelay:1;
+	u8 close_pending:1; /* CONNECTION_CLOSE frame pending transmission */
 
 	/* Close Information */
 	u8  close_frame;   /* Frame type in CONNECTION_CLOSE */

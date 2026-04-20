@@ -202,7 +202,7 @@ static bool quic_outq_delay_check(struct sock *sk, u8 level, bool nodelay)
 	struct quic_outqueue *outq = quic_outq(sk);
 	u64 pacing_time;
 
-	if (level || outq->close_frame)
+	if (level || outq->close_pending)
 		return false; /* No delay for early data/closing conn */
 
 	pacing_time = quic_cong(sk)->pacing_time;
@@ -633,7 +633,7 @@ void quic_outq_transmit_app_close(struct sock *sk)
 		 */
 		level = QUIC_CRYPTO_APP;
 		type = QUIC_FRAME_CONNECTION_CLOSE_APP;
-		outq->close_frame = type;
+		outq->close_pending = 1;
 		quic_outq_transmit(sk); /* Flush before sending close frame. */
 	} else if (quic_is_establishing(sk)) {
 		/* Handshake in progress: send close in INITIAL packets. */
