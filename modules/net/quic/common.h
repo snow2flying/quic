@@ -64,6 +64,7 @@ struct quic_skb_cb {
 	u8 backlog:1;    /* Enqueued into backlog list */
 	u8 resume:1;     /* Crypto already processed (encrypted or decrypted) */
 	u8 path:1;       /* Packet arrived from a new or migrating path */
+	u8 sync:1;       /* Force synchronous crypto (process context only) */
 	u8 ecn:2;        /* ECN marking used on TX */
 };
 

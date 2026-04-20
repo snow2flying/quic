@@ -374,7 +374,7 @@ static int quic_crypto_header_protect(struct quic_crypto *crypto,
 	skcipher_request_set_crypt(req, &sg, &sg, QUIC_SAMPLE_LEN, iv);
 	err = crypto_skcipher_encrypt(req);
 	if (err)
-		goto err;
+		goto out;
 
 	/* rfc9001#section-5.4.1:
 	 *
@@ -406,7 +406,7 @@ static int quic_crypto_header_protect(struct quic_crypto *crypto,
 
 	if (!enc)
 		err = quic_crypto_get_number(skb);
-err:
+out:
 	kfree_sensitive(mask);
 	return err;
 }
@@ -512,7 +512,7 @@ static int quic_crypto_payload_protect(struct quic_crypto *crypto,
 	sg_init_table(sg, nsg);
 	err = skb_to_sgvec(skb, sg, 0, sglen);
 	if (err < 0)
-		goto err;
+		goto out;
 
 	/* rfc9001#section-5.3:
 	 *
@@ -537,9 +537,19 @@ static int quic_crypto_payload_protect(struct quic_crypto *crypto,
 	aead_request_set_tfm(req, tfm);
 	aead_request_set_ad(req, hlen);
 	aead_request_set_crypt(req, sg, sg, len - hlen, iv);
+	if (cb->sync) {
+		DECLARE_CRYPTO_WAIT(wait);
+
+		aead_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG,
+					  crypto_req_done, &wait);
+		err = enc ? crypto_aead_encrypt(req) : crypto_aead_decrypt(req);
+		if (err == -EINPROGRESS || err == -EBUSY)
+			err = crypto_wait_req(err, &wait);
+		goto out;
+	}
+
 	aead_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG,
 				  (void *)quic_crypto_done, skb);
-
 	*(struct quic_crypto **)ctx = crypto;
 	cb->crypto_ctx = ctx; /* Async free context for quic_crypto_done() */
 	err = enc ? crypto_aead_encrypt(req) : crypto_aead_decrypt(req);
@@ -549,7 +559,7 @@ static int quic_crypto_payload_protect(struct quic_crypto *crypto,
 		return -EINPROGRESS;
 	}
 
-err:
+out:
 	kfree_sensitive(ctx);
 	memzero_explicit(nonce, sizeof(nonce));
 	return err;
@@ -639,6 +649,7 @@ int quic_crypto_decrypt(struct quic_crypto *crypto, struct sk_buff *skb)
 			cb->errcode = QUIC_TRANSPORT_ERROR_KEY_UPDATE;
 			return err;
 		}
+		cb->sync = 1;
 		cb->key_update = 1; /* Mark packet as triggering key update. */
 	}
 
