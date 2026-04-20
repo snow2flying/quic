@@ -166,6 +166,12 @@ static inline bool quic_frame_crypto(u8 type)
 	return type == QUIC_FRAME_CRYPTO;
 }
 
+static inline bool quic_frame_close(u8 type)
+{
+	return type == QUIC_FRAME_CONNECTION_CLOSE ||
+	       type == QUIC_FRAME_CONNECTION_CLOSE_APP;
+}
+
 /* Check if a given frame type is valid for the specified encryption level,
  * based on the Frame Types table from rfc9000#section-12.4.
  *

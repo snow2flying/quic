@@ -603,9 +603,6 @@ void quic_outq_transmit_close(struct sock *sk, u8 type, u32 errcode, u8 level)
 	struct quic_outqueue *outq = quic_outq(sk);
 	struct quic_connection_close c = {};
 
-	if (!errcode)
-		return;
-
 	c.errcode = errcode;
 	c.frame = type;
 	quic_inq_event_recv(sk, QUIC_EVENT_CONNECTION_CLOSE, &c, sizeof(c));

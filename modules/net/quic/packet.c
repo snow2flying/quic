@@ -1299,6 +1299,43 @@ out:
 	sock_put(sk);
 }
 
+static int quic_packet_process_error(struct sock *sk, struct sk_buff *skb,
+				     int err)
+{
+	struct quic_outqueue *outq = quic_outq(sk);
+	struct quic_skb_cb *cb = QUIC_SKB_CB(skb);
+	int ret;
+
+	if (!err) /* Invoked from backlog scheduling path. */
+		goto send;
+
+	pr_debug("%s: failed, num: %llu, level: %d, err: %d\n",
+		 __func__, cb->number, cb->level, err);
+
+	/* Do not generate a CONNECTION_CLOSE if the error is non-fatal (no
+	 * transport errcode set), or a close is already pending.
+	 */
+	if (!cb->errcode || outq->close_pending) {
+		kfree_skb(skb);
+		return err;
+	}
+
+	/* Schedule packet processing in backlog context so the CONNECTION_CLOSE
+	 * can be sent from a safe/process context.
+	 */
+	ret = quic_packet_backlog_schedule(sock_net(sk), skb);
+	if (ret) {
+		if (ret > 0) /* Mark it only if scheduling succeeded. */
+			outq->close_pending = 1;
+		return err;
+	}
+
+send:
+	quic_outq_transmit_close(sk, cb->errframe, cb->errcode, cb->level);
+	kfree_skb(skb);
+	return err;
+}
+
 /* Process the header of an incoming long-header QUIC handshake packet.  Parses
  * the packet type and handles Version Negotiation and Retry if present. Sets
  * packet->level to 0 if the packet is fully consumed.
@@ -1418,7 +1455,10 @@ static int quic_packet_handshake_process(struct sock *sk, struct sk_buff *skb)
 	struct quic_crypto *crypto;
 	struct quic_pnspace *space;
 	struct udphdr *uh;
-	int err;
+	int err = 0;
+
+	if (cb->errcode) /* Re-entered after backlog scheduling. */
+		goto err;
 
 	/* Associate skb with sk to ensure sk is valid during async decryption
 	 * completion.
@@ -1641,12 +1681,7 @@ next:
 	consume_skb(skb);
 	return 0;
 err:
-	pr_debug("%s: failed, num: %llu, level: %d, err: %d\n",
-		 __func__, cb->number, cb->level, err);
-	/* Transmit a CLOSE frame packet if errcode is set. */
-	quic_outq_transmit_close(sk, cb->errframe, cb->errcode, cb->level);
-	kfree_skb(skb);
-	return err;
+	return quic_packet_process_error(sk, skb, err);
 }
 
 /* Check if the packet arrived on an alternate path. If so and no alternate
@@ -1817,7 +1852,10 @@ static int quic_packet_app_process(struct sock *sk, struct sk_buff *skb)
 	struct net *net = sock_net(sk);
 	struct quic_frame frame = {};
 	u8 taglen, key_phase;
-	int err = -EINVAL;
+	int err = 0;
+
+	if (cb->errcode) /* Re-entered after backlog scheduling. */
+		goto err;
 
 	sock_rps_save_rxhash(sk, skb);
 
@@ -1835,6 +1873,7 @@ static int quic_packet_app_process(struct sock *sk, struct sk_buff *skb)
 		 * value of 0.
 		 */
 		QUIC_INC_STATS(net, QUIC_MIB_PKT_INVHDRDROP);
+		err = -EINVAL;
 		goto err;
 	}
 
@@ -1961,12 +2000,7 @@ out:
 	return quic_packet_app_process_done(sk, skb);
 
 err:
-	pr_debug("%s: failed, num: %llu, len: %d, err: %d\n",
-		 __func__, cb->number, skb->len, err);
-	/* Transmit a CLOSE frame packet if errcode is set. */
-	quic_outq_transmit_close(sk, cb->errframe, cb->errcode, 0);
-	kfree_skb(skb);
-	return err;
+	return quic_packet_process_error(sk, skb, err);
 }
 
 int quic_packet_process(struct sock *sk, struct sk_buff *skb)
@@ -2058,6 +2092,9 @@ static u8 *quic_packet_pack_frames(struct sock *sk, struct sk_buff *skb,
 			 __func__, number, frame->type, skb->len, frame->len,
 			 packet->level);
 		if (!frame->ack_eliciting || quic_frame_ping(frame->type)) {
+			/* CONNECTION_CLOSE must be encrypted synchronously. */
+			if (quic_frame_close(frame->type))
+				cb->sync = 1;
 			/* Skip non-ACK-eliciting/ping frames for tracking. */
 			quic_frame_put(frame);
 			continue;
