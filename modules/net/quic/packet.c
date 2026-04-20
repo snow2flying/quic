@@ -1502,7 +1502,7 @@ static int quic_packet_handshake_process(struct sock *sk, struct sk_buff *skb)
 		if (err) {
 			if (err > 0) { /* Trigger ACK if PN already marked. */
 				packet->ack_requested = 1;
-				goto next;
+				goto skip;
 			}
 			QUIC_INC_STATS(net, QUIC_MIB_PKT_INVNUMDROP);
 			goto err;
@@ -1546,45 +1546,37 @@ static int quic_packet_handshake_process(struct sock *sk, struct sk_buff *skb)
 			quic_outq_update_loss_timer(sk);
 		}
 
-		if (!paths->validated) {
-			/* Increase anti-amplification credit if path isn't
-			 * validated.
+		if (paths->validated)
+			goto skip;
+
+		/* Increase anti-amplification credit if not validated. */
+		paths->ampl_rcvlen += cb->number_offset + cb->length;
+		if (cb->level == QUIC_CRYPTO_HANDSHAKE) {
+			/* rfc9000#section-8.1:
+			 *
+			 * Once an endpoint has successfully processed a
+			 * Handshake packet from the peer, it can consider the
+			 * peer address to have been validated.
+			 *
+			 * (Handshake keys are ready, mark path validated and
+			 * clean up transmitted initial packets).
 			 */
-			paths->ampl_rcvlen += cb->number_offset + cb->length;
-			if (cb->level == QUIC_CRYPTO_HANDSHAKE) {
-				/* rfc9000#section-8.1:
-				 *
-				 * Once an endpoint has successfully processed
-				 * a Handshake packet from the peer, it can
-				 * consider the peer address to have been
-				 * validated.
-				 *
-				 * (Handshake keys are ready, mark path
-				 * validated and clean up transmitted initial
-				 * packets).
-				 */
-				paths->validated = 1;
-				quic_outq_transmitted_sack(sk,
-							   QUIC_CRYPTO_INITIAL,
-							   QUIC_PN_MAX, 0, -1,
-							   0);
-			}
+			paths->validated = 1;
+			quic_outq_transmitted_sack(sk, QUIC_CRYPTO_INITIAL,
+						   QUIC_PN_MAX, 0, -1, 0);
 		}
 
-next:
-		/* Advance skb pointer to next QUIC packet. */
-		skb_pull(skb, cb->number_offset + cb->length);
-
+skip:
 		cb->resume = 0; /* Clear resume for next decryption */
 		/* Reset to mark header decryption incomplete. */
 		cb->number_len = 0;
 		if (!packet->ack_requested)
-			continue; /* No ACK-eliciting frame: skip ACK. */
+			goto next; /* No ACK-eliciting frame: skip ACK. */
 
 		space->need_sack = 1; /* ACK needed for this packet space. */
 		if (cb->level != QUIC_CRYPTO_INITIAL) {
 			start_ack_timer = true;
-			continue;
+			goto next;
 		}
 
 		/* If the Initial packet has only CRYPTO/ACK frames
@@ -1606,7 +1598,7 @@ next:
 			conn_id = quic_conn_id_active(quic_dest(sk));
 			quic_conn_id_update(conn_id, packet->scid.data,
 					    packet->scid.len);
-			continue;
+			goto next;
 		}
 		/* rfc9000#section-14.1:
 		 *
@@ -1623,6 +1615,9 @@ next:
 			err = -EINVAL;
 			goto err;
 		}
+next:
+		/* Advance skb pointer to next QUIC packet. */
+		skb_pull(skb, cb->number_offset + cb->length);
 	}
 	if (inq->sack_flag == QUIC_SACK_FLAG_NONE && start_ack_timer) {
 		/* ACKs are not sent immediately, as they are typically bundled
