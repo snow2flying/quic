@@ -235,6 +235,7 @@ void quic_packet_rcv_err_pmtu(struct sock *sk)
 	 * AEAD tag.  Also notify the QUIC path layer for possible state
 	 * changes and probing.
 	 */
+	packet->level = 0;
 	taglen = quic_packet_taglen(packet);
 	info = info - packet->hlen - taglen;
 	pathmtu = quic_path_pl_toobig(paths, info, &reset_timer);
@@ -1323,6 +1324,7 @@ static int quic_packet_handshake_header_process(struct sock *sk,
 	if (!version) { /* Version == 0 means a Version Negotiation packet. */
 		if (!quic_packet_backlog_schedule(net, skb))
 			quic_packet_version_process(sk, skb);
+		/* Reset level: may change in quic_packet_version_process(). */
 		packet->level = 0;
 		return 0;
 	}
@@ -1452,13 +1454,15 @@ static int quic_packet_handshake_process(struct sock *sk, struct sk_buff *skb)
 		err = quic_packet_handshake_header_process(sk, skb);
 		if (err) {
 			QUIC_INC_STATS(net, QUIC_MIB_PKT_INVHDRDROP);
+			cb->level = packet->level;
 			goto err;
 		}
 		if (!packet->level) /* Already consumed (e.g., Retry). */
 			return 0;
 
-		crypto = quic_crypto(sk, packet->level);
-		space = quic_pnspace(sk, packet->level);
+		cb->level = packet->level;
+		crypto = quic_crypto(sk, cb->level);
+		space = quic_pnspace(sk, cb->level);
 
 		/* Set highest received PN for PN decode during decryption. */
 		cb->number = space->max_pn_seen;
@@ -1489,7 +1493,7 @@ static int quic_packet_handshake_process(struct sock *sk, struct sk_buff *skb)
 		}
 
 		pr_debug("%s: recvd, num: %llu, level: %d, len: %d\n",
-			 __func__, cb->number, packet->level, skb->len);
+			 __func__, cb->number, cb->level, skb->len);
 
 		/* Use packet arrival time as current (may be from backlog). */
 		space->time = cb->time;
@@ -1507,8 +1511,8 @@ static int quic_packet_handshake_process(struct sock *sk, struct sk_buff *skb)
 		/* Prepare a 'coalesced' frame for parsing and processing. */
 		frame.data = skb->data + cb->number_offset + cb->number_len;
 		frame.len = cb->length - cb->number_len -
-			    packet->taglen[QUIC_PACKET_FORM_LONG];
-		frame.level = packet->level;
+			    quic_packet_taglen(packet);
+		frame.level = cb->level;
 		frame.skb = skb;
 		/* Process this 'coalesced' frame. */
 		err = quic_frame_process(sk, &frame);
@@ -1538,7 +1542,7 @@ static int quic_packet_handshake_process(struct sock *sk, struct sk_buff *skb)
 			 * packets and a PTO to ensure acknowledgments are
 			 * received.
 			 */
-			quic_outq_retransmit_mark(sk, packet->level, false);
+			quic_outq_retransmit_mark(sk, cb->level, false);
 			quic_outq_update_loss_timer(sk);
 		}
 
@@ -1547,7 +1551,7 @@ static int quic_packet_handshake_process(struct sock *sk, struct sk_buff *skb)
 			 * validated.
 			 */
 			paths->ampl_rcvlen += cb->number_offset + cb->length;
-			if (packet->level == QUIC_CRYPTO_HANDSHAKE) {
+			if (cb->level == QUIC_CRYPTO_HANDSHAKE) {
 				/* rfc9000#section-8.1:
 				 *
 				 * Once an endpoint has successfully processed
@@ -1578,7 +1582,7 @@ next:
 			continue; /* No ACK-eliciting frame: skip ACK. */
 
 		space->need_sack = 1; /* ACK needed for this packet space. */
-		if (packet->level != QUIC_CRYPTO_INITIAL) {
+		if (cb->level != QUIC_CRYPTO_INITIAL) {
 			start_ack_timer = true;
 			continue;
 		}
@@ -1643,9 +1647,9 @@ next:
 	return 0;
 err:
 	pr_debug("%s: failed, num: %llu, level: %d, err: %d\n",
-		 __func__, cb->number, packet->level, err);
+		 __func__, cb->number, cb->level, err);
 	/* Transmit a CLOSE frame packet if errcode is set. */
-	quic_outq_transmit_close(sk, cb->errframe, cb->errcode, packet->level);
+	quic_outq_transmit_close(sk, cb->errframe, cb->errcode, cb->level);
 	kfree_skb(skb);
 	return err;
 }
