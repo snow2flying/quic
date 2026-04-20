@@ -192,15 +192,16 @@ int quic_inq_stream_recv(struct sock *sk, struct quic_frame *frame)
 	s64 stream_id = stream->id;
 	struct list_head *head;
 	struct quic_frame *pos;
+	bool size_known;
 
 	/* Discard duplicate frames that are fully covered by the current
 	 * receive offset.  However, do not discard if this frame carries a FIN
 	 * and the stream has not yet received any FIN, to ensure proper
 	 * handling of stream termination.
 	 */
+	size_known = (stream->recv.state == QUIC_STREAM_RECV_STATE_SIZE_KNOWN);
 	if (stream->recv.offset >= offset + frame->len &&
-	    (stream->recv.state == QUIC_STREAM_RECV_STATE_SIZE_KNOWN ||
-	     !frame->stream_fin)) {
+	    (size_known || !frame->stream_fin)) {
 		quic_frame_put(frame);
 		return 0;
 	}
@@ -230,7 +231,7 @@ int quic_inq_stream_recv(struct sock *sk, struct quic_frame *frame)
 			return -ENOBUFS;
 		}
 		/* Check for violation of known final size (protocol error). */
-		if (stream->recv.finalsz && off > stream->recv.finalsz) {
+		if (size_known && off > stream->recv.finalsz) {
 			frame->errcode = QUIC_TRANSPORT_ERROR_FINAL_SIZE;
 			quic_inq_rfree((int)frame->len, sk);
 			return -EINVAL;
@@ -265,40 +266,43 @@ int quic_inq_stream_recv(struct sock *sk, struct quic_frame *frame)
 				return 0;
 			}
 		}
-		if (frame->stream_fin) {
-			/* rfc9000#section-4.5:
-			 *
-			 * Once a final size for a stream is known, it cannot
-			 * change. If a RESET_STREAM or STREAM frame is
-			 * received indicating a change in the final size for
-			 * the stream, an endpoint SHOULD respond with an error
-			 * of type FINAL_SIZE_ERROR.
-			 */
-			if (off < stream->recv.highest ||
-			    (stream->recv.finalsz &&
-			     stream->recv.finalsz != off)) {
-				frame->errcode =
-					QUIC_TRANSPORT_ERROR_FINAL_SIZE;
-				quic_inq_rfree((int)frame->len, sk);
-				return -EINVAL;
-			}
-			/* Notify that the stream has known the final size. */
-			update.id = stream->id;
-			update.state = QUIC_STREAM_RECV_STATE_SIZE_KNOWN;
-			update.finalsz = off;
-			quic_inq_event_recv(sk, QUIC_EVENT_STREAM_UPDATE,
-					    &update, sizeof(update));
 
-			/* rfc9000#section-3.2:
-			 *
-			 * When a STREAM frame with a FIN bit is received, the
-			 * final size of the stream is known; The receiving
-			 * part of the stream then enters the "Size Known"
-			 * state.
-			 */
-			stream->recv.state = update.state;
-			stream->recv.finalsz = update.finalsz;
+		if (!frame->stream_fin)
+			goto add;
+
+		/* rfc9000#section-4.5:
+		 *
+		 * Once a final size for a stream is known, it cannot change.
+		 * If a RESET_STREAM or STREAM frame is received indicating a
+		 * change in the final size for the stream, an endpoint SHOULD
+		 * respond with an error of type FINAL_SIZE_ERROR.
+		 */
+		if (off < stream->recv.highest ||
+		    (size_known && stream->recv.finalsz != off)) {
+			frame->errcode = QUIC_TRANSPORT_ERROR_FINAL_SIZE;
+			quic_inq_rfree((int)frame->len, sk);
+			return -EINVAL;
 		}
+
+		if (size_known)
+			goto add;
+
+		/* Notify that the stream has known the final size. */
+		update.id = stream->id;
+		update.state = QUIC_STREAM_RECV_STATE_SIZE_KNOWN;
+		update.finalsz = off;
+		quic_inq_event_recv(sk, QUIC_EVENT_STREAM_UPDATE, &update,
+				    sizeof(update));
+
+		/* rfc9000#section-3.2:
+		 *
+		 * When a STREAM frame with a FIN bit is received, the final
+		 * size of the stream is known; The receiving part of the
+		 * stream then enters the "Size Known" state.
+		 */
+		stream->recv.state = update.state;
+		stream->recv.finalsz = update.finalsz;
+add:
 		list_add_tail(&frame->list, head);
 		stream->recv.frags++;
 		inq->highest += highest;

@@ -1467,7 +1467,8 @@ static int quic_frame_reset_stream_process(struct sock *sk,
 		goto out; /* Skip if stream has received all data or a reset. */
 
 	if (finalsz < stream->recv.highest ||
-	    (stream->recv.finalsz && stream->recv.finalsz != finalsz)) {
+	    (stream->recv.state == QUIC_STREAM_RECV_STATE_SIZE_KNOWN &&
+	     stream->recv.finalsz != finalsz)) {
 		/* rfc9000#section-4.5:
 		 *
 		 * Once a final size for a stream is known, it cannot change.
