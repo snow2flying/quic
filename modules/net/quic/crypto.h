@@ -33,7 +33,6 @@ struct quic_crypto {
 	struct crypto_shash *secret_tfm;   /* Key derivation (HKDF) tfm */
 	struct crypto_aead *tx_tfm[2]; /* AEAD tfm for TX (key phase 0 and 1) */
 	struct crypto_aead *rx_tfm[2]; /* AEAD tfm for RX (key phase 0 and 1) */
-	struct crypto_aead *tag_tfm;   /* AEAD tfm used for token validation */
 	struct quic_cipher *cipher;    /* Cipher info (selected cipher suite) */
 	u32 cipher_type; /* Cipher suite (e.g., AES_GCM_128, etc.) */
 

@@ -715,16 +715,6 @@ int quic_crypto_set_cipher(struct quic_crypto *crypto, u32 type)
 		return PTR_ERR(tfm);
 	crypto->secret_tfm = tfm;
 
-	/* Request only synchronous crypto by specifying CRYPTO_ALG_ASYNC.  This
-	 * ensures tag generation does not rely on async callbacks.
-	 */
-	tfm = crypto_alloc_aead(cipher->aead, 0, CRYPTO_ALG_ASYNC);
-	if (IS_ERR(tfm)) {
-		err = PTR_ERR(tfm);
-		goto err;
-	}
-	crypto->tag_tfm = tfm;
-
 	/* Allocate AEAD and HP transform for each RX key phase. */
 	tfm = crypto_alloc_aead(cipher->aead, 0, 0);
 	if (IS_ERR(tfm)) {
@@ -994,8 +984,10 @@ EXPORT_SYMBOL_GPL(quic_crypto_initial_keys_install);
 int quic_crypto_get_retry_tag(struct quic_crypto *crypto, struct sk_buff *skb,
 			      struct quic_conn_id *odcid, u32 version, u8 *tag)
 {
-	struct crypto_aead *tfm = crypto->tag_tfm;
+	/* Reuse RX AEAD (phase 1) in Initial crypto. */
+	struct crypto_aead *tfm = crypto->rx_tfm[1];
 	u8 *pseudo_retry, *p, *iv, *key;
+	DECLARE_CRYPTO_WAIT(wait);
 	struct aead_request *req;
 	struct scatterlist *sg;
 	u32 plen;
@@ -1050,9 +1042,14 @@ int quic_crypto_get_retry_tag(struct quic_crypto *crypto, struct sk_buff *skb,
 	aead_request_set_tfm(req, tfm);
 	aead_request_set_ad(req, plen);
 	aead_request_set_crypt(req, sg, sg, 0, iv);
+	aead_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG,
+				  crypto_req_done, &wait);
 	err = crypto_aead_encrypt(req);
+	if (err == -EINPROGRESS || err == -EBUSY)
+		err = crypto_wait_req(err, &wait);
 	if (!err)
 		memcpy(tag, p, QUIC_TAG_LEN);
+
 	kfree_sensitive(pseudo_retry);
 	return err;
 }
@@ -1071,7 +1068,8 @@ static void *quic_crypto_token_init(struct quic_crypto *crypto, u32 len,
 				    struct scatterlist **sg)
 {
 	u8 key[TLS_CIPHER_AES_GCM_128_KEY_SIZE], iv[QUIC_IV_LEN];
-	struct crypto_aead *tfm = crypto->tag_tfm;
+	/* Reuse TX AEAD (phase 1) in Initial crypto. */
+	struct crypto_aead *tfm = crypto->tx_tfm[1];
 	struct quic_data srt = {}, k, i;
 	void *token = NULL;
 	int err;
@@ -1119,6 +1117,7 @@ int quic_crypto_generate_token(struct quic_crypto *crypto, void *addr,
 {
 	u8 *token_buf, *iv, *p, flag = *token;
 	u64 ts = quic_ktime_get_us();
+	DECLARE_CRYPTO_WAIT(wait);
 	struct aead_request *req;
 	struct scatterlist *sg;
 	int err, len;
@@ -1135,11 +1134,15 @@ int quic_crypto_generate_token(struct quic_crypto *crypto, void *addr,
 	quic_put_data(p, conn_id->data, conn_id->len);
 
 	sg_init_one(sg, token_buf, len);
-	aead_request_set_tfm(req, crypto->tag_tfm);
+	aead_request_set_tfm(req, crypto->tx_tfm[1]);
 	aead_request_set_ad(req, sizeof(flag) + addrlen);
 	aead_request_set_crypt(req, sg, sg,
 			       len - sizeof(flag) - addrlen - QUIC_TAG_LEN, iv);
+	aead_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG,
+				  crypto_req_done, &wait);
 	err = crypto_aead_encrypt(req);
+	if (err == -EINPROGRESS || err == -EBUSY)
+		err = crypto_wait_req(err, &wait);
 	if (err)
 		goto out;
 
@@ -1168,6 +1171,7 @@ int quic_crypto_verify_token(struct quic_crypto *crypto, void *addr,
 {
 	u64 t, ts = quic_ktime_get_us(), timeout = QUIC_TOKEN_TIMEOUT_RETRY;
 	u8 *token_buf, *iv, *p, flag;
+	DECLARE_CRYPTO_WAIT(wait);
 	struct aead_request *req;
 	struct scatterlist *sg;
 	int err;
@@ -1182,10 +1186,14 @@ int quic_crypto_verify_token(struct quic_crypto *crypto, void *addr,
 	memcpy(token_buf, token, len);
 
 	sg_init_one(sg, token_buf, len);
-	aead_request_set_tfm(req, crypto->tag_tfm);
+	aead_request_set_tfm(req, crypto->tx_tfm[1]);
 	aead_request_set_ad(req, sizeof(flag) + addrlen);
 	aead_request_set_crypt(req, sg, sg, len - sizeof(flag) - addrlen, iv);
+	aead_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG,
+				  crypto_req_done, &wait);
 	err = crypto_aead_decrypt(req);
+	if (err == -EINPROGRESS || err == -EBUSY)
+		err = crypto_wait_req(err, &wait);
 	if (err)
 		goto out;
 
