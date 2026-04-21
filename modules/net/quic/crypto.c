@@ -1055,23 +1055,21 @@ int quic_crypto_get_retry_tag(struct quic_crypto *crypto, struct sk_buff *skb,
 }
 EXPORT_SYMBOL_GPL(quic_crypto_get_retry_tag);
 
-/* Initialize crypto for token operations.
- *
- * Derives a key and IV using HKDF, configures the AEAD transform, and
- * allocates memory for the token request. Used by both generation and
- * verification paths.
- *
- * Returns the token buffer on success or an ERR_PTR() on failure.
+/* Derives a key and IV using HKDF, configures the AEAD transform and performs
+ * AEAD encryption/decryption for the provided token.
  */
-static void *quic_crypto_token_init(struct quic_crypto *crypto, u32 len,
-				    u8 **token_iv, struct aead_request **req,
-				    struct scatterlist **sg)
+static int quic_crypto_token_protect(struct quic_crypto *crypto, u8 *token,
+				     u32 len, u32 adlen, bool enc)
 {
-	u8 key[TLS_CIPHER_AES_GCM_128_KEY_SIZE], iv[QUIC_IV_LEN];
+	u8 key[TLS_CIPHER_AES_GCM_128_KEY_SIZE], iv[QUIC_IV_LEN], *tiv;
 	/* Reuse TX AEAD (phase 1) in Initial crypto. */
 	struct crypto_aead *tfm = crypto->tx_tfm[1];
+	u32 extra = enc ? QUIC_TAG_LEN : 0;
 	struct quic_data srt = {}, k, i;
-	void *token = NULL;
+	DECLARE_CRYPTO_WAIT(wait);
+	struct aead_request *req;
+	struct scatterlist *sg;
+	void *ctx = NULL;
 	int err;
 
 	quic_data(&srt, quic_random_data, QUIC_RANDOM_DATA_LEN);
@@ -1087,16 +1085,28 @@ static void *quic_crypto_token_init(struct quic_crypto *crypto, u32 len,
 	err = crypto_aead_setkey(tfm, key, TLS_CIPHER_AES_GCM_128_KEY_SIZE);
 	if (err)
 		goto out;
-	token = quic_crypto_aead_mem_alloc(tfm, len, token_iv, req, sg, 1);
-	if (!token) {
+	ctx = quic_crypto_aead_mem_alloc(tfm, 0, &tiv, &req, &sg, 1);
+	if (!ctx) {
 		err = -ENOMEM;
 		goto out;
 	}
-	memcpy(*token_iv, iv, QUIC_IV_LEN);
+	memcpy(tiv, iv, QUIC_IV_LEN);
+
+	sg_init_one(sg, token, len);
+	aead_request_set_tfm(req, tfm);
+	aead_request_set_ad(req, adlen);
+	aead_request_set_crypt(req, sg, sg, len - adlen - extra, tiv);
+	aead_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG,
+				  crypto_req_done, &wait);
+	err = enc ? crypto_aead_encrypt(req) : crypto_aead_decrypt(req);
+	if (err == -EINPROGRESS || err == -EBUSY)
+		err = crypto_wait_req(err, &wait);
+
 out:
 	memzero_explicit(key, sizeof(key));
 	memzero_explicit(iv, sizeof(iv));
-	return token ?: ERR_PTR(err);
+	kfree_sensitive(ctx);
+	return err;
 }
 
 /* Generate a token for Retry or address validation.
@@ -1115,17 +1125,14 @@ int quic_crypto_generate_token(struct quic_crypto *crypto, void *addr,
 			       u32 addrlen, struct quic_conn_id *conn_id,
 			       u8 *token, u32 *tlen)
 {
-	u8 *token_buf, *iv, *p, flag = *token;
+	u8 *token_buf, *p, flag = *token;
 	u64 ts = quic_ktime_get_us();
-	DECLARE_CRYPTO_WAIT(wait);
-	struct aead_request *req;
-	struct scatterlist *sg;
 	int err, len;
 
 	len = sizeof(flag) + addrlen + sizeof(ts) + conn_id->len + QUIC_TAG_LEN;
-	token_buf = quic_crypto_token_init(crypto, len, &iv, &req, &sg);
-	if (IS_ERR(token_buf))
-		return PTR_ERR(token_buf);
+	token_buf = kzalloc(len, GFP_KERNEL);
+	if (!token_buf)
+		return -ENOMEM;
 
 	p = token_buf;
 	p = quic_put_int(p, flag, sizeof(flag));
@@ -1133,23 +1140,15 @@ int quic_crypto_generate_token(struct quic_crypto *crypto, void *addr,
 	p = quic_put_int(p, ts, sizeof(ts));
 	quic_put_data(p, conn_id->data, conn_id->len);
 
-	sg_init_one(sg, token_buf, len);
-	aead_request_set_tfm(req, crypto->tx_tfm[1]);
-	aead_request_set_ad(req, sizeof(flag) + addrlen);
-	aead_request_set_crypt(req, sg, sg,
-			       len - sizeof(flag) - addrlen - QUIC_TAG_LEN, iv);
-	aead_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG,
-				  crypto_req_done, &wait);
-	err = crypto_aead_encrypt(req);
-	if (err == -EINPROGRESS || err == -EBUSY)
-		err = crypto_wait_req(err, &wait);
+	err = quic_crypto_token_protect(crypto, token_buf, len,
+					sizeof(flag) + addrlen, true);
 	if (err)
 		goto out;
 
 	memcpy(token, token_buf, len);
 	*tlen = len;
 out:
-	kfree_sensitive(token_buf);
+	kfree(token_buf);
 	return err;
 }
 EXPORT_SYMBOL_GPL(quic_crypto_generate_token);
@@ -1170,30 +1169,18 @@ int quic_crypto_verify_token(struct quic_crypto *crypto, void *addr,
 			     u8 *token, u32 len)
 {
 	u64 t, ts = quic_ktime_get_us(), timeout = QUIC_TOKEN_TIMEOUT_RETRY;
-	u8 *token_buf, *iv, *p, flag;
-	DECLARE_CRYPTO_WAIT(wait);
-	struct aead_request *req;
-	struct scatterlist *sg;
+	u8 *token_buf, *p, flag;
 	int err;
 
 	if (len < sizeof(flag) + addrlen + sizeof(ts) + QUIC_TAG_LEN)
 		return -EINVAL;
-
-	token_buf = quic_crypto_token_init(crypto, len, &iv, &req, &sg);
-	if (IS_ERR(token_buf))
-		return PTR_ERR(token_buf);
-
+	token_buf = kzalloc(len, GFP_KERNEL);
+	if (!token_buf)
+		return -ENOMEM;
 	memcpy(token_buf, token, len);
 
-	sg_init_one(sg, token_buf, len);
-	aead_request_set_tfm(req, crypto->tx_tfm[1]);
-	aead_request_set_ad(req, sizeof(flag) + addrlen);
-	aead_request_set_crypt(req, sg, sg, len - sizeof(flag) - addrlen, iv);
-	aead_request_set_callback(req, CRYPTO_TFM_REQ_MAY_BACKLOG,
-				  crypto_req_done, &wait);
-	err = crypto_aead_decrypt(req);
-	if (err == -EINPROGRESS || err == -EBUSY)
-		err = crypto_wait_req(err, &wait);
+	err = quic_crypto_token_protect(crypto, token_buf, len,
+					sizeof(flag) + addrlen, false);
 	if (err)
 		goto out;
 
@@ -1219,7 +1206,7 @@ int quic_crypto_verify_token(struct quic_crypto *crypto, void *addr,
 		quic_conn_id_update(conn_id, p, len);
 	err = 0;
 out:
-	kfree_sensitive(token_buf);
+	kfree(token_buf);
 	return err;
 }
 EXPORT_SYMBOL_GPL(quic_crypto_verify_token);
