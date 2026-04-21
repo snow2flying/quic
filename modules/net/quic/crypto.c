@@ -700,7 +700,7 @@ out:
 }
 EXPORT_SYMBOL_GPL(quic_crypto_decrypt);
 
-int quic_crypto_set_cipher(struct quic_crypto *crypto, u32 type, u32 flag)
+int quic_crypto_set_cipher(struct quic_crypto *crypto, u32 type)
 {
 	struct quic_cipher *cipher;
 	void *tfm;
@@ -726,13 +726,13 @@ int quic_crypto_set_cipher(struct quic_crypto *crypto, u32 type, u32 flag)
 	crypto->tag_tfm = tfm;
 
 	/* Allocate AEAD and HP transform for each RX key phase. */
-	tfm = crypto_alloc_aead(cipher->aead, 0, flag);
+	tfm = crypto_alloc_aead(cipher->aead, 0, 0);
 	if (IS_ERR(tfm)) {
 		err = PTR_ERR(tfm);
 		goto err;
 	}
 	crypto->rx_tfm[0] = tfm;
-	tfm = crypto_alloc_aead(cipher->aead, 0, flag);
+	tfm = crypto_alloc_aead(cipher->aead, 0, 0);
 	if (IS_ERR(tfm)) {
 		err = PTR_ERR(tfm);
 		goto err;
@@ -746,13 +746,13 @@ int quic_crypto_set_cipher(struct quic_crypto *crypto, u32 type, u32 flag)
 	crypto->rx_hp_tfm = tfm;
 
 	/* Allocate AEAD and HP transform for each TX key phase. */
-	tfm = crypto_alloc_aead(cipher->aead, 0, flag);
+	tfm = crypto_alloc_aead(cipher->aead, 0, 0);
 	if (IS_ERR(tfm)) {
 		err = PTR_ERR(tfm);
 		goto err;
 	}
 	crypto->tx_tfm[0] = tfm;
-	tfm = crypto_alloc_aead(cipher->aead, 0, flag);
+	tfm = crypto_alloc_aead(cipher->aead, 0, 0);
 	if (IS_ERR(tfm)) {
 		err = PTR_ERR(tfm);
 		goto err;
@@ -774,8 +774,7 @@ err:
 }
 
 int quic_crypto_set_secret(struct quic_crypto *crypto,
-			   struct quic_crypto_secret *srt,
-			   u32 version, u32 flag)
+			   struct quic_crypto_secret *srt, u32 version)
 {
 	u8 phase = crypto->key_phase;
 	struct quic_cipher *cipher;
@@ -783,7 +782,7 @@ int quic_crypto_set_secret(struct quic_crypto *crypto,
 
 	/* If no cipher has been initialized yet, set it up. */
 	if (!crypto->cipher) {
-		err = quic_crypto_set_cipher(crypto, srt->type, flag);
+		err = quic_crypto_set_cipher(crypto, srt->type);
 		if (err)
 			return err;
 	}
@@ -878,8 +877,6 @@ EXPORT_SYMBOL_GPL(quic_crypto_key_update);
 
 void quic_crypto_free(struct quic_crypto *crypto)
 {
-	if (crypto->tag_tfm)
-		crypto_free_aead(crypto->tag_tfm);
 	if (crypto->rx_tfm[0])
 		crypto_free_aead(crypto->rx_tfm[0]);
 	if (crypto->rx_tfm[1])
@@ -966,7 +963,7 @@ int quic_crypto_initial_keys_install(struct quic_crypto *crypto,
 	err = quic_crypto_hkdf_expand(crypto->secret_tfm, &s, &l, &k);
 	if (err)
 		goto out;
-	err = quic_crypto_set_secret(crypto, &srt, version, 0);
+	err = quic_crypto_set_secret(crypto, &srt, version);
 	if (err)
 		goto out;
 
@@ -977,7 +974,7 @@ int quic_crypto_initial_keys_install(struct quic_crypto *crypto,
 	err = quic_crypto_hkdf_expand(crypto->secret_tfm, &s, &l, &k);
 	if (err)
 		goto out;
-	err = quic_crypto_set_secret(crypto, &srt, version, 0);
+	err = quic_crypto_set_secret(crypto, &srt, version);
 out:
 	memzero_explicit(secret, sizeof(secret));
 	memzero_explicit(&srt, sizeof(srt));

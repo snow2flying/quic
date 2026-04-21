@@ -100,7 +100,7 @@ static int quic_inet_listen(struct socket *sock, int backlog)
 	if (err)
 		goto free;
 	/* Install initial keys to generate Retry/Stateless Reset tokens. */
-	err = quic_crypto_set_cipher(crypto, TLS_CIPHER_AES_GCM_128, 0);
+	err = quic_crypto_set_cipher(crypto, TLS_CIPHER_AES_GCM_128);
 	if (err)
 		goto free;
 
@@ -543,8 +543,7 @@ static int __net_init quic_net_init(struct net *net)
 	if (!qn->stat)
 		return -ENOMEM;
 
-	err = quic_crypto_set_cipher(&qn->crypto, TLS_CIPHER_AES_GCM_128,
-				     CRYPTO_ALG_ASYNC);
+	err = quic_crypto_set_cipher(&qn->crypto, TLS_CIPHER_AES_GCM_128);
 	if (err) {
 		free_percpu(qn->stat);
 		qn->stat = NULL;

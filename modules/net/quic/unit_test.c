@@ -388,20 +388,20 @@ static void quic_crypto_test1(struct kunit *test)
 	memcpy(srt.secret, secret, 48);
 
 	srt.type = 100;
-	ret = quic_crypto_set_secret(&crypto, &srt, QUIC_VERSION_V1, 0);
+	ret = quic_crypto_set_secret(&crypto, &srt, QUIC_VERSION_V1);
 	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
 
 	srt.type = 0;
-	ret = quic_crypto_set_secret(&crypto, &srt, QUIC_VERSION_V1, 0);
+	ret = quic_crypto_set_secret(&crypto, &srt, QUIC_VERSION_V1);
 	KUNIT_EXPECT_EQ(test, ret, -EINVAL);
 
 	srt.type = TLS_CIPHER_AES_GCM_128;
-	ret = quic_crypto_set_secret(&crypto, &srt, QUIC_VERSION_V1, 0);
+	ret = quic_crypto_set_secret(&crypto, &srt, QUIC_VERSION_V1);
 	KUNIT_EXPECT_EQ(test, ret, 0);
 
 	srt.send = 0;
 	srt.type = TLS_CIPHER_AES_GCM_128;
-	ret = quic_crypto_set_secret(&crypto, &srt, QUIC_VERSION_V1, 0);
+	ret = quic_crypto_set_secret(&crypto, &srt, QUIC_VERSION_V1);
 	KUNIT_EXPECT_EQ(test, ret, 0);
 
 	ret = quic_crypto_key_update(&crypto);
@@ -469,7 +469,7 @@ static void quic_crypto_test2(struct kunit *test)
 	srt.level = 0;
 	srt.type = TLS_CIPHER_AES_GCM_128;
 	memcpy(srt.secret, secret, 48);
-	if (quic_crypto_set_secret(&crypto, &srt, QUIC_VERSION_V1, 0))
+	if (quic_crypto_set_secret(&crypto, &srt, QUIC_VERSION_V1))
 		return;
 
 	skb = alloc_skb(296, GFP_ATOMIC);
@@ -499,7 +499,7 @@ static void quic_crypto_test2(struct kunit *test)
 	srt.level = 0;
 	srt.type = TLS_CIPHER_AES_GCM_128;
 	memcpy(srt.secret, secret, 48);
-	if (quic_crypto_set_secret(&crypto, &srt, QUIC_VERSION_V1, 0))
+	if (quic_crypto_set_secret(&crypto, &srt, QUIC_VERSION_V1))
 		goto out;
 
 	WARN_ON(!skb_set_owner_sk_safe(skb, sock->sk));
